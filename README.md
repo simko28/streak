@@ -63,7 +63,8 @@ not hand anyone your codes. Whoever holds the code holds the habits, so treat it
 like a password.
 
 Photos do not travel. They are megabytes and they live in IndexedDB; habits,
-log, tasks and the theme are what sync. Move photos with a full backup.
+log, tasks and the settings (theme, greeting, name) are what sync. Move photos
+with a full backup.
 
 ### Deploying the worker
 
@@ -166,6 +167,8 @@ habit = {
 
 task = { id, text, due, doneAt }         // one-off, excluded from all habit metrics
 log[habitId][date] = 1 | -1 | number | [strings]   // done | skipped | measurement | list
+
+settings = { theme, greet, name }        // greet: the clock-based line on Today
 ```
 
 Scoring is an exponential moving average with a 13 day half life. Days a habit

@@ -2,7 +2,7 @@
    Strategy is stale-while-revalidate: the phone paints from cache instantly,
    the network copy replaces it in the background, and the next launch is current.
    Bump V when you deploy and want the update to land on the very next open. */
-const V = 'streak-v3';
+const V = 'streak-v4';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './icon-192.png', './icon-512.png', './icon-512-maskable.png', './apple-touch-icon.png'

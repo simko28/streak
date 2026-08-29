@@ -33,7 +33,8 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;font-v
 /* ---------- top ---------- */
 .top{display:flex;align-items:center;gap:10px;padding:calc(14px + env(safe-area-inset-top)) var(--pad) 6px;
   max-width:520px;margin:0 auto}
-.top h1{flex:1;margin:0;font-size:26px;font-weight:800;letter-spacing:-.03em}
+.top h1{flex:1;margin:0;font-size:26px;font-weight:800;letter-spacing:-.03em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .top p{margin:2px 0 0;font-size:13px;color:var(--dim);font-weight:500;letter-spacing:0}
 .round{width:40px;height:40px;border-radius:50%;background:var(--lift);display:grid;place-items:center;flex:none;
   transition:transform .12s}
@@ -419,7 +420,7 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 <script>
 /* ================= data ================= */
 const KEY = 'loop-habits-v1';
-let S = { habits: [], log: {}, tasks: [], photos: {}, theme: 'dark' };
+let S = { habits: [], log: {}, tasks: [], photos: {}, theme: 'dark', greet: true, name: '' };
 let timer = null, dirty = false, storageOK = null;
 async function load(){ try{ const r = await window.storage.get(KEY);
   if (r && r.value){ S = Object.assign(S, JSON.parse(r.value)); storageOK = true; return true; } }catch(e){}
@@ -617,6 +618,30 @@ function render(){
   else renderStats();
 }
 
+/* ---------- greeting ----------
+   Steady within an hour band on a given day, different tomorrow, so the header
+   does not reshuffle every time you tap something. {n} becomes ", Simon" when a
+   name is set and disappears when it is not. */
+const GREET = {
+  night:   ['Still up{n}?', 'Late one{n}', 'Quiet hours{n}', 'Burning the midnight oil{n}'],
+  morning: ['Good morning{n}', 'Morning{n}', 'Rise and shine{n}', 'A new day{n}', 'Fresh start{n}'],
+  noon:    ['Good afternoon{n}', 'Afternoon{n}', 'Halfway there{n}', 'Keep it going{n}'],
+  evening: ['Good evening{n}', 'Evening{n}', 'Winding down{n}', 'Nearly there{n}'],
+  late:    ['Good night{n}', 'Wrapping up{n}', 'One last check{n}']
+};
+const band = h => h < 5 ? 'night' : h < 12 ? 'morning' : h < 17 ? 'noon' : h < 22 ? 'evening' : 'late';
+function greeting(){
+  const d = new Date(), b = band(d.getHours()), pool = GREET[b].slice();
+  const who0 = (S.name || '').trim();
+  // Friday morning gets its own line every week rather than once in a blue moon
+  if (d.getDay() === 5 && b === 'morning') return 'Happy Friday' + (who0 ? ', ' + who0 : '');
+  // step one along the list each day, so the same line never lands twice running
+  const [Y, M, D] = key(d).split('-').map(Number);
+  const nth = Math.floor(Date.UTC(Y, M - 1, D) / DAY) + Object.keys(GREET).indexOf(b);
+  const who = (S.name || '').trim();
+  return pool[nth % pool.length].replace('{n}', who ? ', ' + who : '');
+}
+
 /* ================= today ================= */
 function dial(k){
   const l = dueList(k);
@@ -642,7 +667,8 @@ function dial(k){
 function renderToday(){
   const t = today(), l = dueList(sel), off = live().filter(h => !dueOn(h,sel));
   const d = pd(sel), isToday = sel === key(t);
-  $('#title').textContent = isToday ? 'Today' : d.toLocaleDateString(undefined,{weekday:'long'});
+  $('#title').textContent = isToday ? (S.greet === false ? 'Today' : greeting())
+    : d.toLocaleDateString(undefined,{weekday:'long'});
   const tc = tasksFor(sel).filter(x => !x.doneAt).length;
   $('#sub').textContent = d.toLocaleDateString(undefined,{month:'long',day:'numeric'})
     + (tc ? ` · ${tc} task${tc===1?'':'s'}` : '');
@@ -1530,10 +1556,43 @@ function form(existing){
   setTimeout(() => el.querySelector('#nm').focus(), 120);
 }
 
+function greetSheet(){
+  const el = sheet(`<h2>Greeting</h2>
+    <p class="note">A line at the top of Today that follows the clock. It picks a different one each day, so it does not go stale.</p>
+    <button class="optrow ${S.greet === false ? '' : 'on'}" id="gt" type="button">
+      <span class="obox" style="font-size:15px">💬</span>
+      <span class="otxt"><b>Greet me by the hour</b><em>Off means the header just says Today.</em></span>
+      <span class="odot"></span></button>
+    <div class="fld" style="margin-top:14px"><em>Your name</em>
+      <input id="gn" value="${esc(S.name || '')}" maxlength="20" placeholder="Leave empty to be greeted plainly"></div>
+    <div class="tile"><b id="gp" style="font-size:23px;line-height:1.25"></b>
+      <span id="gw">what you would see right now</span></div>
+    <div style="height:16px"></div>
+    <button class="big" id="ok" style="--ac:#7C6BFF">Done</button>`);
+  el.style.setProperty('--ac', '#7C6BFF');
+  let on = S.greet !== false, who = S.name || '';
+  const gp = el.querySelector('#gp'), gw = el.querySelector('#gw'), gt = el.querySelector('#gt');
+  const draw = () => {
+    const keep = S.name; S.name = who;               // preview without committing
+    gp.textContent = on ? greeting() : 'Today';
+    S.name = keep;
+    gw.textContent = on ? 'what you would see right now' : 'the plain header';
+    gt.classList.toggle('on', on);
+  };
+  draw();
+  gt.onclick = () => { on = !on; draw(); if (navigator.vibrate) navigator.vibrate(8); };
+  el.querySelector('#gn').oninput = e => { who = e.target.value; draw(); };
+  el.querySelector('#ok').onclick = () => {
+    S.greet = on; S.name = who.trim();
+    save(); shut(); render();
+  };
+}
+
 /* ================= menu ================= */
 $('#menu').onclick = () => {
   const el = sheet(`<h2>Settings</h2><p class="note">Everything is stored on this device.</p>
     <button class="mrow" data-a="theme">${S.theme==='dark'?'☀️':'🌙'} ${S.theme==='dark'?'Light appearance':'Dark appearance'}</button>
+    <button class="mrow" data-a="greet">💬 Greeting</button>
     <button class="mrow" data-a="ord">↕️ Order and pins</button>
     <button class="mrow" data-a="rem">⏰ Reminders</button>
     <button class="mrow" data-a="arch">📦 Archived habits</button>
@@ -1544,6 +1603,7 @@ $('#menu').onclick = () => {
   el.onclick = e => { const b = e.target.closest('[data-a]'); if (e.target.id === 'cx') return shut(); if (!b) return;
     const a = b.dataset.a; shut();
     if (a === 'theme'){ S.theme = S.theme === 'dark' ? 'light' : 'dark'; theme(); save(); }
+    if (a === 'greet') greetSheet();
     if (a === 'arch') archived();
     if (a === 'rem') reminders();
     if (a === 'ord') orderSheet();
@@ -1676,7 +1736,8 @@ const readKey = async k => { try{ const r = await window.storage.get(k);
 const writeKey = async (k, v) => { try{ await window.storage.set(k, JSON.stringify(v)); }catch(e){} };
 
 /* what actually travels */
-const travels = s => ({ habits: s.habits, log: s.log, tasks: s.tasks, theme: s.theme });
+const travels = s => ({ habits: s.habits, log: s.log, tasks: s.tasks,
+                        theme: s.theme, greet: s.greet, name: s.name });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const byId = a => Object.fromEntries((a || []).map(x => [x.id, x]));
 
@@ -1715,13 +1776,19 @@ function mergeLog(base, local, remote){
   }
   return { log: out, conflicts };
 }
+/* plain values: the side that still matches the base did not touch it.
+   Written the long way because `remote || local` would mangle false. */
+const pick = (b, l, r) => same(b, l) ? (r === undefined ? l : r) : l;
 function merge3(base, local, remote){
-  const b = base || { habits: [], log: {}, tasks: [], theme: local.theme };
+  const b = base || { habits: [], log: {}, tasks: [],
+                      theme: local.theme, greet: local.greet, name: local.name };
   const h = mergeList(b.habits, local.habits, remote.habits);
   const t = mergeList(b.tasks, local.tasks, remote.tasks);
   const g = mergeLog(b.log, local.log, remote.log);
-  const theme = same(b.theme, local.theme) ? (remote.theme || local.theme) : local.theme;
-  return { state: { habits: h.list, log: g.log, tasks: t.list, theme },
+  return { state: { habits: h.list, log: g.log, tasks: t.list,
+                    theme: pick(b.theme, local.theme, remote.theme),
+                    greet: pick(b.greet, local.greet, remote.greet),
+                    name:  pick(b.name,  local.name,  remote.name) },
            conflicts: h.conflicts + t.conflicts + g.conflicts };
 }
 
@@ -1743,6 +1810,8 @@ function syncSoon(){ if (!syncOn() || applying) return;
 async function adopt(state){
   applying = true;
   S.habits = state.habits; S.log = state.log; S.tasks = state.tasks; S.theme = state.theme;
+  if (state.greet !== undefined) S.greet = state.greet;
+  if (state.name !== undefined) S.name = state.name;
   save(); theme();
   applying = false;
   await writeKey(SBASE, state);

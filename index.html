@@ -320,6 +320,8 @@ body.light .nav{box-shadow:0 8px 26px rgba(20,20,40,.14)}
 .mrow{width:100%;text-align:left;padding:15px 4px;font-size:16px;font-weight:600;border-bottom:1px solid var(--edge);
   display:flex;align-items:center;gap:12px}
 .mrow:last-of-type{border-bottom:0}
+.ver{margin:16px 0 0;text-align:center;font-size:11.5px;font-weight:600;
+  color:var(--dim);opacity:.65;letter-spacing:.03em}
 
 /* keypad */
 .disp{text-align:center;padding:14px 0 18px}
@@ -429,6 +431,7 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 
 <script>
 /* ================= data ================= */
+const VERSION = '1.0.0';
 const KEY = 'loop-habits-v1';
 let S = { habits: [], log: {}, tasks: [], photos: {}, theme: 'dark', greet: true, name: '' };
 let timer = null, dirty = false, storageOK = null;
@@ -1619,18 +1622,193 @@ function greetSheet(){
   };
 }
 
+/* ---------- export for an AI to read ----------
+   Not a data dump: a chatbot needs to know what a skipped day means and how the
+   score is built before the numbers mean anything, so the file says so first. */
+const mdCell = s => String(s).replace(/\|/g, '\\|');
+function habitStats(h){
+  const began = firstDay(h), end = key(today());
+  const months = {};
+  let sched = 0, hit = 0, skips = 0, sum = 0, logged = 0;
+  let d = pd(began);
+  while (key(d) <= end){
+    const k = key(d);
+    if (dueOn(h, k)){
+      if (skipped(h, k)) skips++;
+      else {
+        const m = k.slice(0, 7);
+        (months[m] ||= { done: 0, sched: 0 }).sched++;
+        sched++;
+        if (done(h, k)){ hit++; months[m].done++; }
+      }
+    }
+    if (h.type === 'num' && val(h, k) > 0){ sum += val(h, k); logged++; }
+    if (h.type === 'list' && items(h, k).length){ sum += items(h, k).length; logged++; }
+    d = shift(d, 1);
+  }
+  return { began, sched, hit, skips, sum, logged, months };
+}
+function aiMarkdown(){
+  const t = today(), tk0 = key(t), L = live(), who = (S.name || '').trim();
+  const longDate = k => pd(k).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+  const out = [];
+  out.push('# Habit log' + (who ? ' — ' + who : ''));
+  out.push('');
+  out.push('Exported ' + longDate(tk0) + ' from Streak, a personal habit tracker.');
+  out.push('');
+  out.push('## How to read this');
+  out.push('');
+  out.push('- Every habit is scheduled either on set weekdays or at a frequency such as 3 times a week.');
+  out.push('- A scheduled day ends up as **done**, **missed**, or **skipped**. A skip is deliberate (illness, travel) and is not counted as a miss.');
+  out.push('- **Score** is an exponential moving average with a 13 day half life over scheduled days only, so it reflects recent behaviour rather than a lifetime average.');
+  out.push('- The score needs about 13 scheduled days to climb near its ceiling, so a young habit, or one scheduled weekly, reads low even at 100% completion. Compare it against the completion rate rather than reading it alone.');
+  out.push('- Days before a habit existed are not counted at all, in either direction.');
+  out.push('- Habits of type *number* have a daily goal, e.g. 20 pages. Type *list* asks for N written things a day.');
+  out.push('- One-off tasks never affect any habit score or streak.');
+  out.push('');
+  out.push('## Overview');
+  out.push('');
+  const first = L.map(h => firstDay(h)).sort()[0];
+  if (first) out.push('- Logging since ' + longDate(first) + ' (day ' + (daysBetween(first, tk0) + 1) + ')');
+  out.push('- Active habits: ' + L.length);
+  const arch = S.habits.filter(h => h.archived).length;
+  if (arch) out.push('- Archived habits: ' + arch);
+  if (L.length){
+    out.push('- Average score right now: ' + Math.round(L.reduce((a, h) => a + score(h, t), 0) / L.length * 100) + '%');
+    let perf = 0; for (let i = 0; i < 30; i++) if (perfect(key(shift(t, -i)))) perf++;
+    out.push('- Perfect days in the last 30: ' + perf);
+    out.push('- Current perfect-day streak: ' + fireStreak());
+    out.push('- Longest streak on any habit: ' + L.reduce((a, h) => Math.max(a, streaks(h).best), 0) + ' days');
+  }
+  out.push('');
+  out.push('## Habits');
+  for (const h of L){
+    const s = habitStats(h), st = streaks(h);
+    out.push('');
+    out.push('### ' + (h.icon ? h.icon + ' ' : '') + h.name);
+    out.push('');
+    if (h.question) out.push('- The question asked each day: "' + h.question + '"');
+    out.push('- Type: ' + (h.type === 'yes' ? 'done or not'
+      : h.type === 'num' ? 'number, goal ' + h.target + (h.unit ? ' ' + h.unit : '') + ' a day'
+      : 'list, ' + h.target + ' things a day'));
+    out.push('- Schedule: ' + schedLabel(h));
+    out.push('- Logging since: ' + longDate(s.began) + ' (' + (daysBetween(s.began, tk0) + 1) + ' days)');
+    out.push('- Score: ' + Math.round(score(h, t) * 100) + '%');
+    out.push('- Current streak: ' + st.current + ' · best ever: ' + st.best);
+    out.push('- Completed ' + s.hit + ' of ' + s.sched + ' scheduled days'
+      + (s.sched ? ' (' + Math.round(s.hit / s.sched * 100) + '%)' : ''));
+    if (s.skips) out.push('- Deliberately skipped: ' + s.skips + (s.skips === 1 ? ' day' : ' days'));
+    if (h.type === 'num' && s.logged) out.push('- Logged ' + (+s.sum.toFixed(2)) + ' ' + (h.unit || '')
+      + ' across ' + s.logged + ' days, averaging ' + (+(s.sum / s.logged).toFixed(2)) + ' ' + (h.unit || '') + ' on days it happened');
+    if (h.type === 'list' && s.logged) out.push('- Wrote ' + s.sum + ' things across ' + s.logged + ' days');
+    const ms = Object.keys(s.months).sort();
+    if (ms.length > 1){
+      out.push('');
+      out.push('| month | done | scheduled | rate |');
+      out.push('|---|---|---|---|');
+      for (const m of ms){
+        const v = s.months[m];
+        out.push('| ' + pd(m + '-01').toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+          + ' | ' + v.done + ' | ' + v.sched + ' | ' + (v.sched ? Math.round(v.done / v.sched * 100) + '%' : '–') + ' |');
+      }
+    }
+  }
+  if (L.length){
+    out.push('');
+    out.push('## The last 30 days');
+    out.push('');
+    out.push('| date | day | ' + L.map(h => mdCell(h.name)).join(' | ') + ' | day |');
+    out.push('|---|---|' + L.map(() => '---|').join('') + '---|');
+    for (let i = 29; i >= 0; i--){
+      const k = key(shift(t, -i));
+      const cells = L.map(h => {
+        if (k < firstDay(h)) return 'not yet';
+        if (!dueOn(h, k)) return '–';
+        if (skipped(h, k)) return 'skipped';
+        if (h.type === 'num') return val(h, k) > 0 ? String(+val(h, k).toFixed(2)) : 'missed';
+        if (h.type === 'list') return items(h, k).length ? items(h, k).length + '/' + h.target : 'missed';
+        return done(h, k) ? 'done' : 'missed';
+      });
+      out.push('| ' + k + ' | ' + DAYSHORT[pd(k).getDay()] + ' | ' + cells.join(' | ')
+        + ' | ' + Math.round(dayPct(k) * 100) + '% |');
+    }
+  }
+  const writers = L.filter(h => h.type === 'list');
+  if (writers.length){
+    out.push('');
+    out.push('## What was written');
+    for (const h of writers){
+      const days = Object.keys(S.log[h.id] || {}).filter(k => items(h, k).length).sort().reverse().slice(0, 14);
+      if (!days.length) continue;
+      out.push('');
+      out.push('### ' + (h.icon ? h.icon + ' ' : '') + h.name);
+      out.push('');
+      for (const k of days) out.push('- **' + k + '**: ' + items(h, k).join(' · '));
+    }
+  }
+  const openT = S.tasks.filter(x => !x.doneAt), doneT = S.tasks.filter(x => x.doneAt && x.doneAt >= key(shift(t, -29)));
+  if (openT.length || doneT.length){
+    out.push('');
+    out.push('## One-off tasks');
+    out.push('');
+    out.push('These sit outside every habit metric.');
+    out.push('');
+    if (openT.length){ out.push('Still open:');
+      for (const x of openT) out.push('- ' + x.text + (x.due ? ' (due ' + x.due + ')' : '')); }
+    if (doneT.length){ out.push(''); out.push('Finished in the last 30 days: ' + doneT.length); }
+  }
+  out.push('');
+  out.push('## Worth asking');
+  out.push('');
+  out.push('- Which of these is actually holding, and which is quietly dying?');
+  out.push('- Is any goal set too high to be met on an ordinary day?');
+  out.push('- Do the misses cluster on particular weekdays, or after a break?');
+  out.push('- Which single change would do the most for the average score?');
+  out.push('');
+  return out.join('\n');
+}
+
+function aiExport(){
+  const md = aiMarkdown();
+  const el = sheet(`<h2>Export for AI</h2>
+    <p class="note">A Markdown summary written for a chatbot to read: what the numbers mean, every habit's record, the last 30 days, and a few questions to start it off. Paste it into Claude and ask what it sees.</p>
+    <textarea readonly rows="7" style="font-family:ui-monospace,monospace;font-size:11.5px">${esc(md)}</textarea>
+    <p class="note" style="margin:8px 0 0">${(md.length / 1024).toFixed(1)} KB · ${md.split('\n').length} lines</p>
+    <div style="height:12px"></div>
+    <button class="big" id="cp" style="--ac:#7C6BFF">Copy to clipboard</button>
+    <button class="ghost" id="dl">Download the .md file</button>
+    <button class="ghost" id="cx">Close</button>`);
+  const ta = el.querySelector('textarea');
+  ta.onclick = () => ta.select();
+  el.querySelector('#cx').onclick = shut;
+  el.querySelector('#cp').onclick = async () => {
+    try{ await navigator.clipboard.writeText(md); toast('Copied — paste it into a chat'); }
+    catch(e){ ta.select(); ta.setSelectionRange(0, md.length); toast('Select all and copy'); }
+  };
+  el.querySelector('#dl').onclick = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+    a.download = 'streak-for-ai-' + key(today()) + '.md';
+    a.click();
+    toast('Downloaded');
+  };
+}
+
 /* ================= menu ================= */
 $('#menu').onclick = () => {
-  const el = sheet(`<h2>Settings</h2><p class="note">Everything is stored on this device.</p>
+  const el = sheet(`<h2>Settings</h2><p class="note">${syncOn()
+      ? 'Syncing across your devices.' : 'Everything is stored on this device.'}</p>
     <button class="mrow" data-a="theme">${S.theme==='dark'?'☀️':'🌙'} ${S.theme==='dark'?'Light appearance':'Dark appearance'}</button>
     <button class="mrow" data-a="greet">💬 Greeting</button>
     <button class="mrow" data-a="ord">↕️ Order and pins</button>
     <button class="mrow" data-a="rem">⏰ Reminders</button>
     <button class="mrow" data-a="arch">📦 Archived habits</button>
     <button class="mrow" data-a="sync">🔄 Sync across devices</button>
+    <button class="mrow" data-a="ai">🤖 Export for AI</button>
     <button class="mrow" data-a="exp">⬇️ Export my data</button>
     <button class="mrow" data-a="imp">⬆️ Import data</button>
-    <div style="height:14px"></div><button class="ghost" id="cx">Close</button>`);
+    <div style="height:14px"></div><button class="ghost" id="cx">Close</button>
+    <p class="ver">Streak ${VERSION} · by Simon Koncal</p>`);
   el.onclick = e => { const b = e.target.closest('[data-a]'); if (e.target.id === 'cx') return shut(); if (!b) return;
     const a = b.dataset.a; shut();
     if (a === 'theme'){ S.theme = S.theme === 'dark' ? 'light' : 'dark'; theme(); save(); }
@@ -1639,6 +1817,7 @@ $('#menu').onclick = () => {
     if (a === 'rem') reminders();
     if (a === 'ord') orderSheet();
     if (a === 'sync') syncSheet();
+    if (a === 'ai') aiExport();
     if (a === 'exp') exportData();
     if (a === 'imp') importData(); };
 };

@@ -1,0 +1,146 @@
+# Habits
+
+A habit tracker, task list and progress journal. The whole app is one HTML file,
+with a manifest, a service worker and four icons alongside it so phones can
+install it. No build step, no dependencies, no framework, no network calls.
+
+| file                     | what it is                                    |
+|--------------------------|-----------------------------------------------|
+| `index.html`             | the entire app                                |
+| `manifest.webmanifest`   | name, colours, icons for the installed app    |
+| `sw.js`                  | offline cache of the shell                    |
+| `icon-*.png`, `apple-touch-icon.png` | home screen icons             |
+
+## Run it
+
+```bash
+# any static server, pick one
+npx serve .
+python3 -m http.server 8000
+```
+
+Then open the address it prints. Serve it, do not open `index.html` with
+`file://`: IndexedDB is happier over http, and a service worker will not
+register on `file://` at all. `localhost` counts as secure, so the install
+machinery works there too.
+
+## Put it on your phone
+
+Free, no account beyond GitHub, no build step.
+
+1. github.com, **New repository**, name it `streak`, **Public**. Pages is free
+   on public repos.
+2. **uploading an existing file**, drag in all seven files, Commit.
+3. **Settings, Pages**, source **Deploy from a branch**, `main` and `/ (root)`,
+   Save. A minute later it is live at `https://<you>.github.io/streak/`.
+4. On the phone open that link **in Safari** (iOS) or Chrome (Android), then
+   Share, **Add to Home Screen**. Android also offers Install.
+
+Every path in the app is relative, so a project subdirectory like `/streak/`
+works with nothing to configure. Cloudflare Pages and Netlify are the same
+drag-and-drop story if you prefer them.
+
+**Install before you import.** On iOS the installed app gets its own storage,
+separate from Safari's. Anything you type into the Safari tab does not follow
+you to the Home Screen icon. So: install, open from the icon, then paste your
+backup into Import.
+
+Once installed it opens full screen with no browser chrome, keeps working with
+no signal, and stops being subject to Safari's habit of clearing data for sites
+you have not visited in seven days.
+
+## Updating it after it is live
+
+Upload the changed file, wait a minute, reopen the app. The service worker
+serves the cached copy first and fetches the new one behind it, so the change
+shows up on the launch after that. To make it land on the very next open,
+bump `V` in `sw.js` when you deploy.
+
+## Moving your data across from the Claude artifact
+
+1. In the artifact: menu, Export, **Download full backup with photos**
+2. Here: menu, Import, paste the file contents, Replace my data
+
+The plain export skips photos. The full backup includes them as data URLs, so
+it is large but complete.
+
+## How storage works
+
+The file ships with an adapter at the top of `index.html`:
+
+- Inside a Claude artifact, `window.storage` already exists and is used as is
+- Anywhere else, the shim provides the same API using `localStorage` for state
+  and IndexedDB for photos, since base64 images exceed the localStorage quota fast
+
+Nothing in the app knows which one is active. That is deliberate: keep the
+adapter as the only place that touches persistence, and a server backend later
+means rewriting that block alone.
+
+The app also asks for `navigator.storage.persist()` on boot. Browsers grant it
+freely to installed apps, which is the difference between history that survives
+and history a quiet week of not opening the app can erase.
+
+Keys in use:
+
+| key                    | contents                                  |
+|------------------------|-------------------------------------------|
+| `loop-habits-v1`       | habits, log, tasks, photo index, settings  |
+| `photo:<habitId>:<date>` | one full image, JPEG 900px q0.70        |
+| `thumbs:<habitId>`     | all thumbnails for a habit, 190px q0.60    |
+
+Thumbnails are batched so opening a gallery is one read, not thirty.
+
+## Data model
+
+```js
+habit = {
+  id, name, question, icon, color, pos, pinned, archived,
+  type: 'yes' | 'num' | 'list',
+  target,        // num: daily goal, list: things per day
+  unit,          // num only
+  fnum, fden,    // frequency, e.g. 3/7
+  days: [2],     // weekday schedule, empty means every day
+  remind: '08:00',
+  photo: false,  // camera on this habit
+  since, created
+}
+
+task = { id, text, due, doneAt }         // one-off, excluded from all habit metrics
+log[habitId][date] = 1 | -1 | number | [strings]   // done | skipped | measurement | list
+```
+
+Scoring is an exponential moving average with a 13 day half life. Days a habit
+is not scheduled for are skipped entirely rather than counted as misses.
+
+## What to build next, in order of payoff
+
+1. **Push notifications.** The one thing this still cannot do. The manifest and
+   service worker are in place now, so what is left is VAPID keys, a
+   `pushsubscription` stored somewhere, and a cron job that pushes at each
+   reminder time. Cloudflare Workers free tier covers it. On iOS this only works
+   from the installed Home Screen app, never from a Safari tab. Until then the
+   app only nags on days you remember to open it, or through the calendar
+   events under Settings, Reminders.
+2. **Sync.** Currently per device. A small D1 table keyed by user, writing the
+   same JSON the export produces, is enough.
+3. **Streak insurance.** Two automatic passes a month so one miss does not zero
+   the counter and end the run.
+4. **Weekly review.** Surface habits under 50 percent and offer to lower the
+   target.
+
+## Starter prompt for Claude Code
+
+> This is a habit tracker: the whole app is index.html, vanilla JS, no build
+> step, already installable as a PWA via manifest.webmanifest and sw.js. Storage
+> goes through the adapter at the top of index.html and nothing else touches
+> persistence. Add web push for the reminder times: a Cloudflare Worker holding
+> the subscriptions and a cron trigger that pushes at each habit's remind time.
+> Do not change the app logic or the storage keys.
+
+## Conventions worth keeping
+
+- One file for the app, no build. The three files beside it exist only so a
+  phone can install it, and none of them contain app logic.
+- All persistence behind the adapter.
+- Habit metrics never count tasks, and never count days a habit was not due.
+- The `since` date changes what the user reads, never what is scored.

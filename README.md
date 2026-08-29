@@ -10,6 +10,7 @@ install it. No build step, no dependencies, no framework, no network calls.
 | `manifest.webmanifest`   | name, colours, icons for the installed app    |
 | `sw.js`                  | offline cache of the shell                    |
 | `icon-*.png`, `apple-touch-icon.png` | home screen icons             |
+| `sync/`                  | optional Cloudflare Worker, off unless deployed |
 
 ## Run it
 
@@ -48,6 +49,64 @@ backup into Import.
 Once installed it opens full screen with no browser chrome, keeps working with
 no signal, and stops being subject to Safari's habit of clearing data for sites
 you have not visited in seven days.
+
+## Sync across devices
+
+Off by default, and off is a real off: with no sync configured the app makes no
+network requests at all. No account, no email, no third party. Turn it on and
+your phone and computer share one history.
+
+A **sync code** is a long random string the app invents on the first device.
+Paste it into the second device and both read and write the same row. The
+server hashes the code before using it as a key, so a dump of the database does
+not hand anyone your codes. Whoever holds the code holds the habits, so treat it
+like a password.
+
+Photos do not travel. They are megabytes and they live in IndexedDB; habits,
+log, tasks and the theme are what sync. Move photos with a full backup.
+
+### Deploying the worker
+
+Needs a free Cloudflare account. Nothing here costs anything at one user: the
+free tier is 100k requests a day and 5 GB, and this app makes a few dozen
+requests a day and stores a few hundred KB.
+
+```bash
+cd sync
+npx wrangler login
+npx wrangler d1 create streak          # paste the id it prints into wrangler.toml
+npx wrangler d1 execute streak --remote --file=schema.sql
+npx wrangler deploy                    # prints your https://streak-sync.<you>.workers.dev
+```
+
+Then in the app: menu, **Sync across devices**, paste that address, **Start
+syncing this device**. On the second device paste the same address plus the code
+from the first, and press Join.
+
+Optionally set `SYNC_URL` at the top of the sync block in `index.html` so the
+address is prefilled on every device.
+
+### How a merge is decided
+
+Every device keeps the last state it agreed on with the server. That gives a
+real three way merge instead of last-write-wins:
+
+- one side still matches the base, so it did not touch that record: the other side wins
+- both sides changed the same record: this device wins, and the toast says how many
+- deleted on one side, untouched on the other: the deletion travels
+- deleted on one side, edited on the other: the edit rescues it
+
+Ticks land per habit per day, so two devices used on the same day merge cleanly
+rather than one overwriting the other. Pushes only happen when the merge differs
+from the server, otherwise two devices bounce version bumps off each other
+forever.
+
+### Adding Google sign-in later
+
+The storage protocol does not change. It becomes one more route on the worker
+that verifies a Google ID token and hands back the sync code already stored for
+that account, creating one on first sign-in. Signing in then just means "fetch
+my code", and anonymous codes keep working exactly as they do now.
 
 ## Updating it after it is live
 
@@ -121,8 +180,8 @@ is not scheduled for are skipped entirely rather than counted as misses.
    from the installed Home Screen app, never from a Safari tab. Until then the
    app only nags on days you remember to open it, or through the calendar
    events under Settings, Reminders.
-2. **Sync.** Currently per device. A small D1 table keyed by user, writing the
-   same JSON the export produces, is enough.
+2. **Sync for photos.** The state syncs; the images do not. They want R2 or
+   similar, keyed the same way, uploaded once and never rewritten.
 3. **Streak insurance.** Two automatic passes a month so one miss does not zero
    the counter and end the run.
 4. **Weekly review.** Surface habits under 50 percent and offer to lower the

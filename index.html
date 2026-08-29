@@ -427,14 +427,14 @@ async function load(){ try{ const r = await window.storage.get(KEY);
 function save(){ dirty = true; clearTimeout(timer); timer = setTimeout(async () => {
   try{ await window.storage.set(KEY, JSON.stringify(S)); storageOK = true; dirty = false; }
   catch(e){ storageOK = false; }
-  banner(); }, 250); }
+  banner(); syncSoon(); }, 250); }
 function banner(){
   const w = document.getElementById('warn');
   w.classList.toggle('on', storageOK === false);
   if (storageOK === false) w.textContent = 'Not saving yet — publish this artifact so it can store your history. Until then, everything resets when you close it.';
 }
 addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && !dirty && storageOK !== false){ await load(); render(); }
+  if (document.visibilityState === 'visible' && !dirty && storageOK !== false){ await load(); render(); syncNow(true); }
 });
 
 const DAY = 864e5;
@@ -1537,6 +1537,7 @@ $('#menu').onclick = () => {
     <button class="mrow" data-a="ord">↕️ Order and pins</button>
     <button class="mrow" data-a="rem">⏰ Reminders</button>
     <button class="mrow" data-a="arch">📦 Archived habits</button>
+    <button class="mrow" data-a="sync">🔄 Sync across devices</button>
     <button class="mrow" data-a="exp">⬇️ Export my data</button>
     <button class="mrow" data-a="imp">⬆️ Import data</button>
     <div style="height:14px"></div><button class="ghost" id="cx">Close</button>`);
@@ -1546,6 +1547,7 @@ $('#menu').onclick = () => {
     if (a === 'arch') archived();
     if (a === 'rem') reminders();
     if (a === 'ord') orderSheet();
+    if (a === 'sync') syncSheet();
     if (a === 'exp') exportData();
     if (a === 'imp') importData(); };
 };
@@ -1647,6 +1649,189 @@ function importData(){
   };
 }
 
+/* ================= sync =================
+   Off until you turn it on. Nothing leaves the device before that: no account,
+   no email, no third party, no request of any kind.
+
+   A sync code is just a long random string this device invented. Paste it into
+   another device and both read and write the same row. The server hashes it
+   before using it as a key and stores one JSON blob against it.
+
+   Photos never travel — they are megabytes and they live in IndexedDB. Habits,
+   log, tasks and the theme do. ------------------------------------------- */
+const SYNC_URL = 'https://streak-sync.streak-app.workers.dev';
+const SCFG = 'sync-cfg-v1', SBASE = 'sync-base-v1';
+let sync = { url: SYNC_URL, code: '', at: 0 };
+let syncing = false, syncTimer = null, applying = false;
+
+const CODE_ABC = 'abcdefghjkmnpqrstuvwxyz23456789';   // no look-alikes: i l o 0 1
+const newCode = () => {
+  const b = new Uint8Array(20); crypto.getRandomValues(b);
+  return [...b].map(x => CODE_ABC[x % CODE_ABC.length]).join('').replace(/(.{5})(?=.)/g, '$1-');
+};
+const cleanCode = s => String(s || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+
+const readKey = async k => { try{ const r = await window.storage.get(k);
+  return r && r.value ? JSON.parse(r.value) : null; }catch(e){ return null; } };
+const writeKey = async (k, v) => { try{ await window.storage.set(k, JSON.stringify(v)); }catch(e){} };
+
+/* what actually travels */
+const travels = s => ({ habits: s.habits, log: s.log, tasks: s.tasks, theme: s.theme });
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const byId = a => Object.fromEntries((a || []).map(x => [x.id, x]));
+
+/* Three way merge. base is what we last agreed on with the server, so a side
+   that still matches base did not touch that record and the other side wins.
+   Both changed the same record: this device wins and we say how often. */
+function mergeList(base, local, remote){
+  const B = byId(base), L = byId(local), R = byId(remote);
+  const out = []; let conflicts = 0;
+  for (const id of new Set([...Object.keys(L), ...Object.keys(R)])){
+    const b = B[id], l = L[id], r = R[id];
+    if (l && !r){ if (!(b && same(b, l))) out.push(l); continue; }   // gone remotely
+    if (!l && r){ if (!(b && same(b, r))) out.push(r); continue; }   // gone locally
+    if (same(l, r)) { out.push(l); continue; }
+    if (b && same(b, l)) { out.push(r); continue; }
+    if (b && same(b, r)) { out.push(l); continue; }
+    conflicts++; out.push(l);
+  }
+  return { list: out, conflicts };
+}
+function mergeLog(base, local, remote){
+  const out = {}; let conflicts = 0;
+  for (const h of new Set([...Object.keys(local || {}), ...Object.keys(remote || {})])){
+    const b = (base || {})[h] || {}, l = (local || {})[h] || {}, r = (remote || {})[h] || {};
+    const m = {};
+    for (const d of new Set([...Object.keys(l), ...Object.keys(r)])){
+      const bv = b[d], lv = l[d], rv = r[d], had = v => v !== undefined;
+      if (had(lv) && !had(rv)){ if (!(had(bv) && same(bv, lv))) m[d] = lv; continue; }
+      if (!had(lv) && had(rv)){ if (!(had(bv) && same(bv, rv))) m[d] = rv; continue; }
+      if (same(lv, rv)) { m[d] = lv; continue; }
+      if (had(bv) && same(bv, lv)) { m[d] = rv; continue; }
+      if (had(bv) && same(bv, rv)) { m[d] = lv; continue; }
+      conflicts++; m[d] = lv;
+    }
+    if (Object.keys(m).length) out[h] = m;
+  }
+  return { log: out, conflicts };
+}
+function merge3(base, local, remote){
+  const b = base || { habits: [], log: {}, tasks: [], theme: local.theme };
+  const h = mergeList(b.habits, local.habits, remote.habits);
+  const t = mergeList(b.tasks, local.tasks, remote.tasks);
+  const g = mergeLog(b.log, local.log, remote.log);
+  const theme = same(b.theme, local.theme) ? (remote.theme || local.theme) : local.theme;
+  return { state: { habits: h.list, log: g.log, tasks: t.list, theme },
+           conflicts: h.conflicts + t.conflicts + g.conflicts };
+}
+
+async function api(method, body){
+  const r = await fetch(sync.url.replace(/\/+$/, '') + '/state', {
+    method, cache: 'no-store',
+    headers: { 'Authorization': 'Bearer ' + sync.code, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const j = await r.json().catch(() => ({}));
+  return { status: r.status, ...j };
+}
+
+const syncOn = () => !!(sync.url && sync.code);
+function syncSoon(){ if (!syncOn() || applying) return;
+  clearTimeout(syncTimer); syncTimer = setTimeout(() => syncNow(true), 4000); }
+
+/* take a merged state as the truth on this device */
+async function adopt(state){
+  applying = true;
+  S.habits = state.habits; S.log = state.log; S.tasks = state.tasks; S.theme = state.theme;
+  save(); theme();
+  applying = false;
+  await writeKey(SBASE, state);
+  sync.at = Date.now(); await writeKey(SCFG, sync);
+  render();
+}
+async function syncNow(quiet){
+  if (!syncOn() || syncing) return;
+  if (navigator.onLine === false){ if (!quiet) toast('Offline — will sync later'); return; }
+  syncing = true;
+  try{
+    let got = await api('GET');
+    if (got.status === 401) throw new Error('that code was rejected');
+    if (got.status !== 200) throw new Error('server said ' + got.status);
+
+    for (let attempt = 0; attempt < 3; attempt++){
+      const base = await readKey(SBASE);
+      const mine = travels(S);
+      const { state, conflicts } = got.state ? merge3(base, mine, got.state)
+                                             : { state: mine, conflicts: 0 };
+      // Nothing to push when the merge already matches the server — otherwise two
+      // devices bounce version bumps off each other forever. Adopt it locally
+      // either way: on a fresh device the merge IS the server's copy, and
+      // skipping that step is how you end up synced and staring at an empty list.
+      if (!(got.state && same(state, got.state))){
+        const put = await api('PUT', { baseVersion: got.version || 0, state });
+        if (put.status === 409){ got = { status: 200, version: put.version, state: put.state }; continue; }
+        if (put.status !== 200) throw new Error('server said ' + put.status);
+      }
+      await adopt(state);
+      if (!quiet) toast(conflicts ? `Synced · ${conflicts} kept from this device` : 'Synced');
+      return;
+    }
+    throw new Error('too many collisions');
+  }catch(e){ if (!quiet) toast('Sync failed: ' + e.message); }
+  finally{ syncing = false; }
+}
+
+function syncSheet(){
+  const on = syncOn();
+  const when = sync.at ? new Date(sync.at).toLocaleString(undefined,
+    { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' }) : 'never';
+  const el = sheet(`<h2>Sync</h2>
+    <p class="note">${on
+      ? 'This device is syncing. Put the same code into another device and they share one history.'
+      : 'Off. Everything stays on this device and nothing is sent anywhere. Turn it on to share one history across your phone and computer.'}</p>
+    ${on ? `<div class="fld"><em>Your sync code</em>
+        <input id="cd" value="${esc(sync.code)}" readonly style="font-family:ui-monospace,monospace;letter-spacing:.06em"></div>
+      <p class="note" style="margin-top:-6px">Anyone with this code can read and write your habits. Treat it like a password.</p>
+      <div class="fld"><em>Last synced</em><input value="${esc(when)}" readonly></div>
+      <button class="big" id="now" style="--ac:#3DD68C">Sync now</button>
+      <button class="ghost" id="off">Turn sync off on this device</button>`
+    : `<div class="fld"><em>Server address</em>
+        <input id="ur" value="${esc(sync.url)}" placeholder="https://streak-sync.<you>.workers.dev"></div>
+      <button class="big" id="mk" style="--ac:#3DD68C">Start syncing this device</button>
+      <div style="height:6px"></div>
+      <div class="fld"><em>Or join a device you already set up</em>
+        <input id="jc" placeholder="paste its sync code"></div>
+      <button class="ghost" id="jn">Join with that code</button>`}
+    <button class="ghost" id="cx">Close</button>`);
+  el.querySelector('#cx').onclick = shut;
+  const cd = el.querySelector('#cd');
+  if (cd) cd.onclick = () => { cd.select(); toast('Copy it into your other device'); };
+  const now = el.querySelector('#now');
+  if (now) now.onclick = async () => { now.textContent = 'Syncing…'; await syncNow(false);
+    shut(); };
+  const off = el.querySelector('#off');
+  if (off) off.onclick = async () => { sync = { url: sync.url, code: '', at: 0 };
+    await writeKey(SCFG, sync); await writeKey(SBASE, null);
+    shut(); toast('Sync off — your habits stay here'); };
+  const mk = el.querySelector('#mk');
+  if (mk) mk.onclick = async () => {
+    const u = el.querySelector('#ur').value.trim();
+    if (!u) return el.querySelector('#ur').focus();
+    sync = { url: u, code: newCode(), at: 0 };
+    await writeKey(SCFG, sync); await writeKey(SBASE, null);
+    shut(); await syncNow(false); syncSheet();
+  };
+  const jn = el.querySelector('#jn');
+  if (jn) jn.onclick = async () => {
+    const u = el.querySelector('#ur').value.trim(), c = cleanCode(el.querySelector('#jc').value);
+    if (!u) return el.querySelector('#ur').focus();
+    if (c.length < 16) return el.querySelector('#jc').focus();
+    sync = { url: u, code: c, at: 0 };
+    await writeKey(SCFG, sync); await writeKey(SBASE, null);
+    shut(); await syncNow(false);
+  };
+}
+
 /* ================= confetti ================= */
 const cv = $('#confetti'), cx = cv.getContext('2d');
 function burst(){
@@ -1682,6 +1867,9 @@ addEventListener('resize', () => { movePill(true); if (tab === 'grid' && !open) 
   save();
   render();
   stagger();
+  sync = Object.assign(sync, (await readKey(SCFG)) || {});
+  if (!sync.url) sync.url = SYNC_URL;
+  if (syncOn()) syncNow(true);
   requestAnimationFrame(() => movePill(true));
 })();
 </script>

@@ -117,6 +117,9 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;font-v
 .ft em{font-style:normal;font-size:11.5px;color:var(--dim);font-weight:600}
 .fnum{font-size:22px;font-weight:800;letter-spacing:-.03em;flex:none}
 .fnum span{font-size:11px;color:var(--dim);font-weight:700;margin-left:4px}
+.fnum .dp{font-style:normal;font-size:.62em;opacity:.45;font-weight:700}
+.orig .dp{font-style:normal;font-size:.5em;opacity:.4;font-weight:800}
+.mnote{margin:10px 0 0;font-size:11.5px;color:var(--dim);font-weight:500;line-height:1.6;opacity:.85}
 .credits{margin:16px 2px 0;text-align:center;font-size:12.5px;color:var(--dim);
   font-weight:600;line-height:1.6}
 .credits b{color:var(--ink);font-weight:800}
@@ -162,7 +165,10 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;font-v
 .optrow.on .obox svg{fill:var(--ac,#7C6BFF)}
 .otxt{flex:1;min-width:0}
 .otxt b{display:block;font-size:14.5px;font-weight:700}
-.otxt em{font-style:normal;font-size:11.5px;color:var(--dim);font-weight:600}
+/* .fld em is an uppercase field label declared later; a description inside an
+   optrow must not inherit that */
+.otxt em,.fld .otxt em{font-style:normal;font-size:11.5px;color:var(--dim);font-weight:600;
+  text-transform:none;letter-spacing:0;margin-bottom:0;display:block}
 .odot{width:20px;height:20px;border-radius:50%;border:2px solid var(--faint);flex:none;transition:background .2s,border-color .2s}
 .optrow.on .odot{background:var(--ac,#7C6BFF);border-color:var(--ac,#7C6BFF)}
 .cam{width:34px;height:34px;border-radius:12px;flex:none;display:grid;place-items:center;position:relative;z-index:1;
@@ -554,6 +560,37 @@ function seedCredits(){
    Deliberately outside every habit metric. Nothing here touches a score. */
 const freeDays = f => daysBetween(f.since, key(today()));
 
+/* Optional, and off unless you fill it in: what the habit was costing.
+   The number is live, so it is always a little higher than last time you looked. */
+const YEARMS = 365.25 * 864e5;
+const SP500 = 0.10;                       // long run nominal average. An assumption, not a promise.
+const sinceMs = f => Math.max(0, Date.now() - pd(f.since).getTime());
+const perYear = f => (+f.spend || 0) * 12;
+const saved = f => perYear(f) * (sinceMs(f) / YEARMS);
+// money put in steadily and left to compound: a continuous annuity
+const invested = f => perYear(f) / SP500 * (Math.exp(SP500 * sinceMs(f) / YEARMS) - 1);
+const pot = f => f.invest ? invested(f) : saved(f);
+const hasMoney = f => (+f.spend || 0) > 0;
+const cash = f => (f.cur || '€');
+/* the last two digits are dimmed, which is what makes it read as a live counter */
+function moneyHTML(f, dp){
+  const s = pot(f).toFixed(dp);
+  const cut = s.indexOf('.') + 3;                  // cents stay solid, the tail whirrs
+  return esc(cash(f)) + (dp <= 2 ? s : s.slice(0, cut) + '<i class="dp">' + s.slice(cut) + '</i>');
+}
+let moneyTimer = null;
+function paintMoney(){
+  if (document.hidden) return;
+  document.querySelectorAll('[data-money]').forEach(el => {
+    const f = (S.free || []).find(x => x.id === el.dataset.money);
+    if (f) el.innerHTML = moneyHTML(f, +el.dataset.dp || 2);
+  });
+}
+function startMoney(){
+  clearInterval(moneyTimer); moneyTimer = null;
+  if (document.querySelector('[data-money]')) moneyTimer = setInterval(paintMoney, 60);
+}
+
 /* ---------- one-off tasks (kept out of every habit metric) ---------- */
 const tk = () => key(today());
 const tasksFor = k => S.tasks.filter(t => t.doneAt ? t.doneAt === k
@@ -671,6 +708,7 @@ function nav(t){
 }
 function render(){
   if (open) return renderDetail();
+  setTimeout(startMoney, 0);
   screen.scrollTop = 0;
   if (tab === 'today') renderToday();
   else if (tab === 'grid') renderGrid();
@@ -925,12 +963,18 @@ function freeSection(){
   if (!S.free || !S.free.length || sel !== key(today())) return '';
   return `<div class="sect">Free from</div>` + S.free.map(f => {
     const d = freeDays(f);
+    const sub = hasMoney(f)
+      ? `${d} day${d === 1 ? '' : 's'} free${f.best ? ' · best ' + f.best + 'd' : ''}`
+      : `since ${pd(f.since).toLocaleDateString(undefined,{month:'short',day:'numeric'})}${
+          f.best ? ' · best ' + f.best + 'd' : ''}`;
+    // with money on, the growing number leads and the days step back
+    const right = hasMoney(f)
+      ? `<div class="fnum" data-money="${f.id}" data-dp="4" style="color:${f.color}">${moneyHTML(f,4)}</div>`
+      : `<div class="fnum">${d}<span>${d === 1 ? 'day' : 'days'}</span></div>`;
     return `<div class="free" data-free="${f.id}">
       <span class="fdot" style="background:${f.color}"></span>
-      <div class="ft"><b>${esc(f.name)}</b><em>since ${
-        pd(f.since).toLocaleDateString(undefined,{month:'short',day:'numeric'})}${
-        f.best ? ' · best ' + f.best + 'd' : ''}</em></div>
-      <div class="fnum">${d}<span>${d === 1 ? 'day' : 'days'}</span></div></div>`;
+      <div class="ft"><b>${esc(f.name)}</b><em>${sub}</em></div>
+      ${right}</div>`;
   }).join('');
 }
 
@@ -1528,14 +1572,39 @@ function freeForm(f){
   const el = sheet(`<h2>${nw ? 'Free from' : esc(cur.name)}</h2>
     <p class="note">Counts the days since you last did it. It sits outside your habits entirely — no score, no streak, nothing to tick.</p>
     ${nw ? '' : `<div class="tile" style="margin-bottom:16px">
-      <div class="orig"><b style="color:${cur.color}">${d}</b><span>day${d === 1 ? '' : 's'} free</span></div>
-      <p class="ol">Since ${pd(cur.since).toLocaleDateString(undefined,{month:'long',day:'numeric',year:'numeric'})}.${
-        cur.best ? ' Your longest run so far is <b>' + cur.best + ' days</b>.' : ''}</p></div>`}
+      ${hasMoney(cur) ? `<div class="orig"><b data-money="${cur.id}" data-dp="6" style="color:${cur.color}">${
+          moneyHTML(cur,6)}</b><span>${cur.invest ? 'if you had invested it' : 'not spent'}</span></div>
+        <p class="ol">${d} day${d === 1 ? '' : 's'} free, since ${
+          pd(cur.since).toLocaleDateString(undefined,{month:'long',day:'numeric',year:'numeric'})}.${
+          cur.best ? ' Longest run so far <b>' + cur.best + ' days</b>.' : ''}</p>
+        <p class="mnote">${cash(cur)}${(perYear(cur)/365.25).toFixed(2)} a day · ${cash(cur)}${
+          (+cur.spend).toFixed(0)} a month${cur.invest
+          ? ` · ${cash(cur)}${saved(cur).toFixed(2)} of it is money you kept, the rest is growth at the S&P 500's long run average of about 10% a year. That average is an assumption, not a promise.`
+          : ''}</p>`
+      : `<div class="orig"><b style="color:${cur.color}">${d}</b><span>day${d === 1 ? '' : 's'} free</span></div>
+        <p class="ol">Since ${pd(cur.since).toLocaleDateString(undefined,{month:'long',day:'numeric',year:'numeric'})}.${
+          cur.best ? ' Your longest run so far is <b>' + cur.best + ' days</b>.' : ''}</p>`}</div>`}
     <div class="fld"><em>Free from what</em>
       <input id="fn" value="${esc(cur.name)}" maxlength="40" placeholder="Nicotine"></div>
     <div class="fld"><em>Free since</em><input id="fs" type="date" value="${cur.since}"></div>
     <div class="fld"><em>Colour</em><div class="sw" id="fc">${COLORS.map(c =>
       `<button type="button" data-c="${c}" style="background:${c};color:${c}" class="${c === color ? 'on' : ''}"></button>`).join('')}</div></div>
+    <div class="fld"><em>Extras</em>
+      <button class="optrow ${hasMoney(cur) ? 'on' : ''}" id="mo" type="button">
+        <span class="obox" style="font-size:15px">💰</span>
+        <span class="otxt"><b>It was costing me money</b><em>Counts up what you have not spent.</em></span>
+        <span class="odot"></span></button></div>
+    <div id="mf" style="display:${hasMoney(cur) ? 'block' : 'none'}">
+      <div class="row2">
+        <div class="fld"><em>Currency</em><input id="mc" maxlength="3" value="${esc(cur.cur || '€')}" placeholder="€"></div>
+        <div class="fld"><em>Spend a month</em><input id="ms" type="number" inputmode="decimal" step="any" min="0" value="${cur.spend || ''}" placeholder="150"></div>
+      </div>
+      <div class="fld">
+        <button class="optrow ${cur.invest ? 'on' : ''}" id="iv" type="button">
+          <span class="obox" style="font-size:15px">📈</span>
+          <span class="otxt"><b>Invest it instead</b><em>Shows it compounding at the S&P 500 long run average.</em></span>
+          <span class="odot"></span></button></div>
+    </div>
     <button class="big" id="sv" style="--ac:${color}">${nw ? 'Start counting' : 'Save'}</button>
     ${nw ? '<button class="ghost" id="cx">Cancel</button>'
         : '<button class="ghost" id="sl">I slipped — back to day zero</button>' +
@@ -1545,6 +1614,14 @@ function freeForm(f){
     color = b.dataset.c;
     el.querySelectorAll('#fc button').forEach(x => x.classList.toggle('on', x === b));
     el.style.setProperty('--ac', color); el.querySelector('#sv').style.setProperty('--ac', color); };
+  let money = hasMoney(cur), invest = !!cur.invest;
+  const mo = el.querySelector('#mo'), iv = el.querySelector('#iv'), mf = el.querySelector('#mf');
+  mo.onclick = () => { money = !money; mo.classList.toggle('on', money);
+    mf.style.display = money ? 'block' : 'none';
+    if (money && !el.querySelector('#ms').value) el.querySelector('#ms').focus();
+    if (navigator.vibrate) navigator.vibrate(8); };
+  iv.onclick = () => { invest = !invest; iv.classList.toggle('on', invest);
+    if (navigator.vibrate) navigator.vibrate(8); };
   if (nw) el.querySelector('#cx').onclick = shut;
   else {
     el.querySelector('#sl').onclick = () => {
@@ -1560,12 +1637,17 @@ function freeForm(f){
     const name = el.querySelector('#fn').value.trim();
     if (!name){ el.querySelector('#fn').focus(); return; }
     const since = el.querySelector('#fs').value || key(today());
+    const spend = money ? Math.max(0, parseFloat(el.querySelector('#ms').value) || 0) : 0;
+    const symbol = (el.querySelector('#mc').value || '€').trim().slice(0,3) || '€';
     if (nw) (S.free ||= []).push({ id: 'f' + Date.now().toString(36), name, since, color, best: 0,
+                                   spend, cur: symbol, invest: spend > 0 && invest,
                                    created: key(today()) });
-    else { f.name = name; f.since = since; f.color = color; }
+    else { f.name = name; f.since = since; f.color = color;
+           f.spend = spend; f.cur = symbol; f.invest = spend > 0 && invest; }
     save(); shut(); render();
     if (nw) toast('Counting from ' + pd(since).toLocaleDateString(undefined,{month:'long',day:'numeric'}));
   };
+  startMoney();
   if (nw) setTimeout(() => el.querySelector('#fn').focus(), 120);
 }
 
@@ -1975,7 +2057,11 @@ function aiMarkdown(){
     out.push('');
     for (const f of S.free){
       out.push('- **' + f.name + '**: ' + freeDays(f) + ' days free, since ' + f.since
-        + (f.best ? '. Longest run so far ' + f.best + ' days' : '') + '.');
+        + (f.best ? '. Longest run so far ' + f.best + ' days' : '') + '.'
+        + (hasMoney(f) ? ' It was costing ' + cash(f) + (+f.spend).toFixed(0) + ' a month, so '
+            + cash(f) + saved(f).toFixed(2) + ' has not been spent'
+            + (f.invest ? ' (shown in the app as ' + cash(f) + invested(f).toFixed(2)
+                + ' if it had been invested at a 10% annual average)' : '') + '.' : ''));
     }
   }
   out.push('');

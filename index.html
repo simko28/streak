@@ -107,6 +107,19 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;font-v
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tt em{font-style:normal;font-size:11.5px;color:var(--dim);font-weight:600}
 .tt em.late{color:#FFC53D}
+.free{display:flex;align-items:center;gap:12px;background:var(--lift);border-radius:15px;
+  padding:13px 14px;margin-bottom:8px;transition:transform .13s cubic-bezier(.34,1.5,.5,1)}
+.free.press{transform:scale(.985)}
+.fdot{width:10px;height:10px;border-radius:50%;flex:none}
+.ft{flex:1;min-width:0}
+.ft b{display:block;font-size:15px;font-weight:700;letter-spacing:-.01em;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ft em{font-style:normal;font-size:11.5px;color:var(--dim);font-weight:600}
+.fnum{font-size:22px;font-weight:800;letter-spacing:-.03em;flex:none}
+.fnum span{font-size:11px;color:var(--dim);font-weight:700;margin-left:4px}
+.credits{margin:16px 2px 0;text-align:center;font-size:12.5px;color:var(--dim);
+  font-weight:600;line-height:1.6}
+.credits b{color:var(--ink);font-weight:800}
 .addtask{width:100%;text-align:left;padding:12px 14px;border-radius:15px;border:1px dashed var(--edge);
   color:var(--dim);font-size:14px;font-weight:700;margin-bottom:4px}
 .addtask:active{background:var(--lift)}
@@ -447,7 +460,8 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 /* ================= data ================= */
 const VERSION = '1.0.0';
 const KEY = 'loop-habits-v1';
-let S = { habits: [], log: {}, tasks: [], photos: {}, theme: 'dark', greet: true, name: '' };
+let S = { habits: [], log: {}, tasks: [], photos: {}, free: [], seen: null,
+          theme: 'dark', greet: true, name: '' };
 let timer = null, dirty = false, storageOK = null;
 async function load(){ try{ const r = await window.storage.get(KEY);
   if (r && r.value){ S = Object.assign(S, JSON.parse(r.value)); storageOK = true; return true; } }catch(e){}
@@ -524,6 +538,21 @@ const skipped = (h,k) => val(h,k) === -1;
 const ratio = (h,k) => { const v = val(h,k); if (v === -1) return 0;
   return listy(h) ? Math.min(1, items(h,k).length/(h.target||1))
     : h.type === 'num' ? Math.min(1, Math.max(0,v)/(h.target||1)) : (v === 1 ? 1 : 0); };
+
+/* ---------- consistency credits ----------
+   One for every day the app was opened. Kept as a set of days rather than a
+   counter so two devices union cleanly instead of fighting over an integer. */
+const credits = () => Object.keys(S.seen || {}).length;
+function seedCredits(){
+  // an account with history should not start at one: the days it already
+  // logged something are days it showed up
+  if (!S.seen){ S.seen = {}; for (const id in S.log) for (const k in S.log[id]) S.seen[k] = 1; }
+  S.seen[key(today())] = 1;
+}
+
+/* ---------- freedoms: days since you last did the thing ----------
+   Deliberately outside every habit metric. Nothing here touches a score. */
+const freeDays = f => daysBetween(f.since, key(today()));
 
 /* ---------- one-off tasks (kept out of every habit metric) ---------- */
 const tk = () => key(today());
@@ -767,11 +796,12 @@ function renderToday(){
     <div class="week">${week}</div>
     ${cards}
     ${taskSection()}
+    ${freeSection()}
     ${off.length ? `<div class="later">Not today: ${off.map(h =>
       `<span>${h.icon ? esc(h.icon) : `<i style="background:${h.color}"></i>`}${esc(h.name)} · ${esc(schedLabel(h))}</span>`).join('')}</div>` : ''}
     <div style="height:8px"></div>`
   : `<div class="blank">No habits yet.<br>Tap + to start with one you can do today.</div>
-     ${taskSection()}`;
+     ${taskSection()}${freeSection()}`;
   if (l.some(h => h.photo)) paintThumbs();
 }
 
@@ -891,6 +921,19 @@ async function paintThumbs(){
   }
 }
 
+function freeSection(){
+  if (!S.free || !S.free.length || sel !== key(today())) return '';
+  return `<div class="sect">Free from</div>` + S.free.map(f => {
+    const d = freeDays(f);
+    return `<div class="free" data-free="${f.id}">
+      <span class="fdot" style="background:${f.color}"></span>
+      <div class="ft"><b>${esc(f.name)}</b><em>since ${
+        pd(f.since).toLocaleDateString(undefined,{month:'short',day:'numeric'})}${
+        f.best ? ' · best ' + f.best + 'd' : ''}</em></div>
+      <div class="fnum">${d}<span>${d === 1 ? 'day' : 'days'}</span></div></div>`;
+  }).join('');
+}
+
 function taskSection(){
   const list = tasksFor(sel).sort((a,b) =>
     (a.doneAt?1:0)-(b.doneAt?1:0) || (b.due?1:0)-(a.due?1:0) || (a.due||'').localeCompare(b.due||''));
@@ -938,6 +981,8 @@ screen.addEventListener('pointerup', e => {
     const has = (S.photos?.[h.id] || {})[sel];
     if (has) return openViewer(h, shotDays(h), shotDays(h).indexOf(sel));
     return pickPhoto(h, sel); }
+  const fr = e.target.closest('[data-free]');
+  if (fr && !held) return freeForm(S.free.find(x => x.id === fr.dataset.free));
   if (e.target.closest('#at') && !held) return taskForm(null);
   const tsk = e.target.closest('.task');
   if (tsk && !held){
@@ -1083,6 +1128,8 @@ function renderStats(){
        </div>`; })()}
     <div class="sect">All time</div>
     <div class="tile"><b>${ticks}</b><span>days checked off across every habit</span></div>
+    <p class="credits">You have earned <b>${credits()}</b> consistency credit${
+      credits() === 1 ? '' : 's'} — one for every day you turned up.</p>
     <div style="height:20px"></div>`;
 }
 
@@ -1473,6 +1520,55 @@ function orderSheet(){
   el.querySelector('#ok').onclick = shut;
 }
 
+function freeForm(f){
+  const nw = !f;
+  const cur = f || { name: '', since: key(today()), color: COLORS[11], best: 0 };
+  let color = cur.color;
+  const d = nw ? 0 : freeDays(f);
+  const el = sheet(`<h2>${nw ? 'Free from' : esc(cur.name)}</h2>
+    <p class="note">Counts the days since you last did it. It sits outside your habits entirely — no score, no streak, nothing to tick.</p>
+    ${nw ? '' : `<div class="tile" style="margin-bottom:16px">
+      <div class="orig"><b style="color:${cur.color}">${d}</b><span>day${d === 1 ? '' : 's'} free</span></div>
+      <p class="ol">Since ${pd(cur.since).toLocaleDateString(undefined,{month:'long',day:'numeric',year:'numeric'})}.${
+        cur.best ? ' Your longest run so far is <b>' + cur.best + ' days</b>.' : ''}</p></div>`}
+    <div class="fld"><em>Free from what</em>
+      <input id="fn" value="${esc(cur.name)}" maxlength="40" placeholder="Nicotine"></div>
+    <div class="fld"><em>Free since</em><input id="fs" type="date" value="${cur.since}"></div>
+    <div class="fld"><em>Colour</em><div class="sw" id="fc">${COLORS.map(c =>
+      `<button type="button" data-c="${c}" style="background:${c};color:${c}" class="${c === color ? 'on' : ''}"></button>`).join('')}</div></div>
+    <button class="big" id="sv" style="--ac:${color}">${nw ? 'Start counting' : 'Save'}</button>
+    ${nw ? '<button class="ghost" id="cx">Cancel</button>'
+        : '<button class="ghost" id="sl">I slipped — back to day zero</button>' +
+          '<button class="ghost danger" id="dl">Delete this counter</button>'}`);
+  el.style.setProperty('--ac', color);
+  el.querySelector('#fc').onclick = e => { const b = e.target.closest('button'); if (!b) return;
+    color = b.dataset.c;
+    el.querySelectorAll('#fc button').forEach(x => x.classList.toggle('on', x === b));
+    el.style.setProperty('--ac', color); el.querySelector('#sv').style.setProperty('--ac', color); };
+  if (nw) el.querySelector('#cx').onclick = shut;
+  else {
+    el.querySelector('#sl').onclick = () => {
+      f.best = Math.max(f.best || 0, freeDays(f));    // the run is kept, not erased
+      f.since = key(today());
+      save(); shut(); render(); toast('Back to day zero — the old run is kept');
+    };
+    el.querySelector('#dl').onclick = () => {
+      S.free = S.free.filter(x => x.id !== f.id); save(); shut(); render(); toast('Counter deleted');
+    };
+  }
+  el.querySelector('#sv').onclick = () => {
+    const name = el.querySelector('#fn').value.trim();
+    if (!name){ el.querySelector('#fn').focus(); return; }
+    const since = el.querySelector('#fs').value || key(today());
+    if (nw) (S.free ||= []).push({ id: 'f' + Date.now().toString(36), name, since, color, best: 0,
+                                   created: key(today()) });
+    else { f.name = name; f.since = since; f.color = color; }
+    save(); shut(); render();
+    if (nw) toast('Counting from ' + pd(since).toLocaleDateString(undefined,{month:'long',day:'numeric'}));
+  };
+  if (nw) setTimeout(() => el.querySelector('#fn').focus(), 120);
+}
+
 function taskForm(t){
   const nw = !t;
   const cur = t || { text:'', due: key(today()) };
@@ -1519,10 +1615,13 @@ function addChooser(){
     <button class="mrow" data-a="habit"><span style="font-size:19px">🔁</span>
       <span style="flex:1"><b style="display:block;font-size:15.5px">Habit</b>
       <em style="font-style:normal;font-size:12.5px;color:var(--dim);font-weight:600">Repeats. Scored and streaked.</em></span></button>
+    <button class="mrow" data-a="free"><span style="font-size:19px">🛡️</span>
+      <span style="flex:1"><b style="display:block;font-size:15.5px">Free from</b>
+      <em style="font-style:normal;font-size:12.5px;color:var(--dim);font-weight:600">Counts days without. No ticking.</em></span></button>
     <div style="height:14px"></div><button class="ghost" id="cx">Cancel</button>`);
   el.onclick = e => { if (e.target.id === 'cx') return shut();
     const b = e.target.closest('[data-a]'); if (!b) return;
-    shut(); b.dataset.a === 'task' ? taskForm(null) : form(null); };
+    shut(); b.dataset.a === 'task' ? taskForm(null) : b.dataset.a === 'free' ? freeForm(null) : form(null); };
 }
 
 function form(existing){
@@ -1868,6 +1967,21 @@ function aiMarkdown(){
       for (const x of openT) out.push('- ' + x.text + (x.due ? ' (due ' + x.due + ')' : '')); }
     if (doneT.length){ out.push(''); out.push('Finished in the last 30 days: ' + doneT.length); }
   }
+  if ((S.free || []).length){
+    out.push('');
+    out.push('## Free from');
+    out.push('');
+    out.push('Abstinence counters. These are days since the thing last happened; they carry no score and no streak.');
+    out.push('');
+    for (const f of S.free){
+      out.push('- **' + f.name + '**: ' + freeDays(f) + ' days free, since ' + f.since
+        + (f.best ? '. Longest run so far ' + f.best + ' days' : '') + '.');
+    }
+  }
+  out.push('');
+  out.push('## Consistency credits');
+  out.push('');
+  out.push('- ' + credits() + ' credits, one for each day the app was opened.');
   out.push('');
   out.push('## Worth asking');
   out.push('');
@@ -2022,8 +2136,9 @@ function importData(){
       btn.textContent = 'Restoring photos…';
       for (const hid of Object.keys(S.photos || {})) await purgePhotos(hid);
     }
-    S = Object.assign({theme:'dark', habits:[], log:{}, tasks:[], photos:{}}, st);
-    S.log ||= {}; S.tasks ||= []; S.photos ||= {};
+    S = Object.assign({theme:'dark', habits:[], log:{}, tasks:[], photos:{}, free:[]}, st);
+    S.log ||= {}; S.tasks ||= []; S.photos ||= {}; S.free ||= [];
+    seedCredits();
     if (bak) S.photos = await restorePhotos(bak.photos || {});
     save(); theme(); shut(); nav('today');
     toast(bak ? 'Data and photos restored' : 'Data restored');
@@ -2057,7 +2172,7 @@ const readKey = async k => { try{ const r = await window.storage.get(k);
 const writeKey = async (k, v) => { try{ await window.storage.set(k, JSON.stringify(v)); }catch(e){} };
 
 /* what actually travels */
-const travels = s => ({ habits: s.habits, log: s.log, tasks: s.tasks,
+const travels = s => ({ habits: s.habits, log: s.log, tasks: s.tasks, free: s.free, seen: s.seen,
                         theme: s.theme, greet: s.greet, name: s.name });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const byId = a => Object.fromEntries((a || []).map(x => [x.id, x]));
@@ -2079,21 +2194,27 @@ function mergeList(base, local, remote){
   }
   return { list: out, conflicts };
 }
+/* one date-keyed map, merged cell by cell */
+function mergeDays(base, local, remote){
+  const b = base || {}, l = local || {}, r = remote || {}, m = {};
+  let conflicts = 0;
+  for (const d of new Set([...Object.keys(l), ...Object.keys(r)])){
+    const bv = b[d], lv = l[d], rv = r[d], had = v => v !== undefined;
+    if (had(lv) && !had(rv)){ if (!(had(bv) && same(bv, lv))) m[d] = lv; continue; }
+    if (!had(lv) && had(rv)){ if (!(had(bv) && same(bv, rv))) m[d] = rv; continue; }
+    if (same(lv, rv)) { m[d] = lv; continue; }
+    if (had(bv) && same(bv, lv)) { m[d] = rv; continue; }
+    if (had(bv) && same(bv, rv)) { m[d] = lv; continue; }
+    conflicts++; m[d] = lv;
+  }
+  return { days: m, conflicts };
+}
 function mergeLog(base, local, remote){
   const out = {}; let conflicts = 0;
   for (const h of new Set([...Object.keys(local || {}), ...Object.keys(remote || {})])){
-    const b = (base || {})[h] || {}, l = (local || {})[h] || {}, r = (remote || {})[h] || {};
-    const m = {};
-    for (const d of new Set([...Object.keys(l), ...Object.keys(r)])){
-      const bv = b[d], lv = l[d], rv = r[d], had = v => v !== undefined;
-      if (had(lv) && !had(rv)){ if (!(had(bv) && same(bv, lv))) m[d] = lv; continue; }
-      if (!had(lv) && had(rv)){ if (!(had(bv) && same(bv, rv))) m[d] = rv; continue; }
-      if (same(lv, rv)) { m[d] = lv; continue; }
-      if (had(bv) && same(bv, lv)) { m[d] = rv; continue; }
-      if (had(bv) && same(bv, rv)) { m[d] = lv; continue; }
-      conflicts++; m[d] = lv;
-    }
-    if (Object.keys(m).length) out[h] = m;
+    const x = mergeDays((base || {})[h], (local || {})[h], (remote || {})[h]);
+    if (Object.keys(x.days).length) out[h] = x.days;
+    conflicts += x.conflicts;
   }
   return { log: out, conflicts };
 }
@@ -2101,16 +2222,19 @@ function mergeLog(base, local, remote){
    Written the long way because `remote || local` would mangle false. */
 const pick = (b, l, r) => same(b, l) ? (r === undefined ? l : r) : l;
 function merge3(base, local, remote){
-  const b = base || { habits: [], log: {}, tasks: [],
+  const b = base || { habits: [], log: {}, tasks: [], free: [], seen: {},
                       theme: local.theme, greet: local.greet, name: local.name };
   const h = mergeList(b.habits, local.habits, remote.habits);
   const t = mergeList(b.tasks, local.tasks, remote.tasks);
+  const fr = mergeList(b.free, local.free, remote.free);
   const g = mergeLog(b.log, local.log, remote.log);
-  return { state: { habits: h.list, log: g.log, tasks: t.list,
+  // credits are a set of days, so two devices add up instead of overwriting
+  const sn = mergeDays(b.seen, local.seen, remote.seen);
+  return { state: { habits: h.list, log: g.log, tasks: t.list, free: fr.list, seen: sn.days,
                     theme: pick(b.theme, local.theme, remote.theme),
                     greet: pick(b.greet, local.greet, remote.greet),
                     name:  pick(b.name,  local.name,  remote.name) },
-           conflicts: h.conflicts + t.conflicts + g.conflicts };
+           conflicts: h.conflicts + t.conflicts + g.conflicts + fr.conflicts };
 }
 
 async function api(method, body){
@@ -2131,6 +2255,8 @@ function syncSoon(){ if (!syncOn() || applying) return;
 async function adopt(state){
   applying = true;
   S.habits = state.habits; S.log = state.log; S.tasks = state.tasks; S.theme = state.theme;
+  if (state.free !== undefined) S.free = state.free;
+  if (state.seen !== undefined) S.seen = state.seen;
   if (state.greet !== undefined) S.greet = state.greet;
   if (state.name !== undefined) S.name = state.name;
   save(); theme();
@@ -2254,6 +2380,8 @@ addEventListener('resize', () => { movePill(true); if (tab === 'grid' && !open) 
   await load(); theme();
   S.habits.forEach((h,i) => { if (h.pos === undefined) h.pos = i; if (h.pinned === undefined) h.pinned = false;
     if (!h.created) h.created = Object.keys(S.log[h.id] || {}).sort()[0] || key(today()); });
+  S.free ||= [];
+  seedCredits();
   save();
   render();
   stagger();

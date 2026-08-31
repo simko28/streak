@@ -282,7 +282,21 @@ body.light .nav{box-shadow:0 8px 26px rgba(20,20,40,.14)}
 .fld input:focus,.fld select:focus{border-color:var(--ac,#7C6BFF)}
 .row2{display:flex;gap:12px}.row2>*{flex:1}
 .seg{display:flex;background:var(--lift2);border:1px solid var(--edge);border-radius:14px;padding:4px;margin-bottom:16px}
-.seg button{flex:1;padding:10px;border-radius:11px;font-size:14px;font-weight:700;color:var(--dim)}
+.seg button{flex:1;padding:10px 2px;border-radius:11px;font-size:12.5px;font-weight:700;color:var(--dim)}
+.prow{width:100%;display:flex;align-items:center;gap:12px;background:var(--lift2);
+  border:1px solid var(--edge);border-radius:14px;padding:13px 14px;margin-bottom:8px;
+  text-align:left;transition:border-color .2s,transform .1s}
+.prow:active{transform:scale(.985)}
+.prow.on{border-color:var(--ac,#7C6BFF)}
+.prow .pbox{width:24px;height:24px;border-radius:8px;border:2px solid var(--faint);flex:none;
+  display:grid;place-items:center;transition:background .2s,border-color .2s}
+.prow.on .pbox{background:var(--ac,#7C6BFF);border-color:var(--ac,#7C6BFF)}
+.prow .pbox svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:3.6;
+  stroke-linecap:round;stroke-linejoin:round;opacity:0;transition:opacity .15s}
+.prow.on .pbox svg{opacity:1}
+.prow .pname{flex:1;min-width:0;font-size:15px;font-weight:600;color:var(--dim);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:color .2s}
+.prow.on .pname{color:var(--ink)}
 .seg button.on{background:var(--ac,#7C6BFF);color:#fff}
 .entry{padding:12px 0;border-bottom:1px solid var(--edge)}
 .entry:last-child{border-bottom:0}
@@ -479,7 +493,8 @@ function humanSpan(n){
 }
 const firstDay = h => h.created || Object.keys(S.log[h.id] || {}).sort()[0] || key(today());
 const dueOn = (h,k) => !h.days || !h.days.length || h.days.includes(pd(k).getDay());
-const dueList = k => live().filter(h => dueOn(h,k));
+// a habit cannot be missed on a day it did not exist yet
+const dueList = k => live().filter(h => k >= firstDay(h) && dueOn(h,k));
 const schedLabel = h => !h.days || !h.days.length ? freqLabel(h)
   : h.days.length === 7 ? 'Every day'
   : h.days.length === 1 ? 'Every ' + DAYNAME[h.days[0]]
@@ -501,11 +516,13 @@ const setOrder = (list, from, to) => {
 const val = (h,k) => { const m = S.log[h.id]; return m && k in m ? m[k] : 0; };
 const items = (h,k) => { const v = val(h,k); return Array.isArray(v) ? v.filter(x => String(x).trim()) : []; };
 const setVal = (h,k,v) => { (S.log[h.id] ||= {}); v === 0 ? delete S.log[h.id][k] : S.log[h.id][k] = v; save(); };
-const done = (h,k) => h.type === 'list' ? items(h,k).length >= h.target
+// 'list' is free text, 'set' is a fixed checklist; both score on how many landed
+const listy = h => h.type === 'list' || h.type === 'set';
+const done = (h,k) => listy(h) ? items(h,k).length >= h.target
   : h.type === 'num' ? (val(h,k) > 0 && val(h,k) >= h.target) : val(h,k) === 1;
 const skipped = (h,k) => val(h,k) === -1;
 const ratio = (h,k) => { const v = val(h,k); if (v === -1) return 0;
-  return h.type === 'list' ? Math.min(1, items(h,k).length/(h.target||1))
+  return listy(h) ? Math.min(1, items(h,k).length/(h.target||1))
     : h.type === 'num' ? Math.min(1, Math.max(0,v)/(h.target||1)) : (v === 1 ? 1 : 0); };
 
 /* ---------- one-off tasks (kept out of every habit metric) ---------- */
@@ -678,7 +695,7 @@ function dial(k){
 }
 
 function renderToday(){
-  const t = today(), l = dueList(sel), off = live().filter(h => !dueOn(h,sel));
+  const t = today(), l = dueList(sel), off = live().filter(h => sel >= firstDay(h) && !dueOn(h,sel));
   const d = pd(sel), isToday = sel === key(t);
   $('#title').textContent = isToday ? (S.greet === false ? 'Today' : greeting())
     : d.toLocaleDateString(undefined,{weekday:'long'});
@@ -702,7 +719,7 @@ function renderToday(){
   const cards = l.map(h => {
     const isDone = done(h,sel), sk = skipped(h,sel), st = streaks(h);
     let right, meter = '';
-    if (h.type === 'list'){
+    if (listy(h)){
       const c = items(h,sel).length;
       right = `<div class="chip" style="${isDone?`background:${h.color};border-color:${h.color};color:#fff`:''}">${c}<span style="opacity:.6;font-weight:600">/${h.target}</span></div>`;
       meter = `<div class="meter"><i style="width:${Math.round(ratio(h,sel)*100)}%;background:${h.color}"></i></div>`;
@@ -717,6 +734,8 @@ function renderToday(){
     }
     const note = sk ? 'Skipped' :
       overdue(h) ? `⏰ Due since ${h.remind}`
+      : h.type === 'set' ? (items(h,sel).length ? esc(items(h,sel).join(' · '))
+          : `Tick ${h.target} of ${(h.parts||[]).length} · ${schedLabel(h)}`)
       : h.type === 'list' ? (items(h,sel).length ? esc(items(h,sel).join(' · ')) : `Write ${h.target} things · ${schedLabel(h)}`)
       : h.type === 'num' ? `Goal ${h.target} ${esc(h.unit||'')} · ${schedLabel(h)}`
       : (h.days && h.days.length ? schedLabel(h)
@@ -737,8 +756,12 @@ function renderToday(){
         ${l.length
           ? `<div class="num">${n}<span style="color:var(--dim);font-size:24px">/${l.length}</span></div>
              <div class="sub">${n === l.length ? 'All done, nothing left' : `${l.length-n} left to go`}</div>`
-          : `<div class="num" style="font-size:30px">Rest day</div>
-             <div class="sub">Nothing scheduled for this day</div>`}
+          : (() => { const began = live().map(x => firstDay(x)).sort()[0];
+              return began && sel < began
+                ? `<div class="num" style="font-size:30px">Before you started</div>
+                   <div class="sub">You were not logging yet</div>`
+                : `<div class="num" style="font-size:30px">Rest day</div>
+                   <div class="sub">Nothing scheduled for this day</div>`; })()}
         <div class="flame">🔥 ${fire} day${fire===1?'':'s'} perfect</div>
       </div></div>
     <div class="week">${week}</div>
@@ -931,6 +954,7 @@ screen.addEventListener('pointerup', e => {
   if (c && !held){
     const h = S.habits.find(x => x.id === c.dataset.h);
     if (e.target.closest('.glyph') || e.target.closest('.body h3')) return openDetail(h.id);
+    if (h.type === 'set') return checkEditor(h, sel);
     if (h.type === 'list') return listEditor(h, sel);
     if (h.type === 'num') return keypad(h, sel);
     const was = done(h,sel);
@@ -945,7 +969,8 @@ screen.addEventListener('pointerup', e => {
   }
   const g = e.target.closest('.gcell[data-h]');
   if (g && !held){ const h = S.habits.find(x => x.id === g.dataset.h);
-    if (h.type === 'list') listEditor(h, g.dataset.k);
+    if (h.type === 'set') checkEditor(h, g.dataset.k);
+    else if (h.type === 'list') listEditor(h, g.dataset.k);
     else if (h.type === 'num') keypad(h, g.dataset.k);
     else { setVal(h, g.dataset.k, done(h,g.dataset.k) ? 0 : 1); render(); } }
   const s = e.target.closest('[data-detail]');
@@ -983,7 +1008,7 @@ function renderGrid(){
       if (k < began){ cells += `<div class="gcell"><div class="notyet"></div></div>`; continue; }
       if (!dueOn(h,k)){ cells += `<div class="gcell"><div class="offday"></div></div>`; continue; }
       if (skipped(h,k)) inner = `<div class="box" style="background:${h.color};opacity:.22"></div>`;
-      else if (h.type === 'list') inner = `<span style="color:${done(h,k)?h.color:'var(--dim)'};opacity:${items(h,k).length?1:.4}">${items(h,k).length||'–'}</span>`;
+      else if (listy(h)) inner = `<span style="color:${done(h,k)?h.color:'var(--dim)'};opacity:${items(h,k).length?1:.4}">${items(h,k).length||'–'}</span>`;
       else if (h.type === 'num') inner = `<span style="color:${done(h,k)?h.color:'var(--dim)'};opacity:${val(h,k)>0?1:.4}">${val(h,k)>0?+val(h,k).toFixed(2):'–'}</span>`;
       else inner = `<div class="box" style="background:${done(h,k)?h.color:'var(--faint)'}">${done(h,k)?'<svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg>':''}</div>`;
       cells += `<div class="gcell" data-h="${h.id}" data-k="${k}">${inner}</div>`;
@@ -1088,7 +1113,7 @@ function renderDetail(){
   const vals = [], n = 30;
   for (let i = n-1; i >= 0; i--){ const k = key(shift(t,-i));
     vals.push(h.type === 'num' ? Math.max(0,val(h,k))
-      : h.type === 'list' ? items(h,k).length : (done(h,k) ? 1 : 0)); }
+      : listy(h) ? items(h,k).length : (done(h,k) ? 1 : 0)); }
   const mx = Math.max(h.type === 'yes' ? 1 : h.target, ...vals) || 1;
   const bars = vals.map(v => `<i style="height:${Math.max(3,(v/mx)*88)}px;background:${h.color};opacity:${v?1:.16}"></i>`).join('');
   const sum = vals.reduce((a,b)=>a+b,0);
@@ -1103,9 +1128,10 @@ function renderDetail(){
     <div class="tile"><div class="bars">${bars}</div>
       <p style="margin:12px 0 0;font-size:13px;color:var(--dim);font-weight:600">${h.type === 'num'
         ? `${+sum.toFixed(2)} ${esc(h.unit||'')} total · ${+(sum/30).toFixed(2)} per day`
+        : h.type === 'set' ? `${sum} ticked · ${vals.filter(v=>v>0).length} of 30 days`
         : h.type === 'list' ? `${sum} things written · ${vals.filter(v=>v>0).length} of 30 days`
         : `${sum} of 30 days done`}</p></div>
-    ${h.type === 'list' ? entriesFeed(h) : ''}
+    ${listy(h) ? entriesFeed(h) : ''}
     ${h.photo ? photoSection(h) : ''}
     <div class="sect">Four months</div>
     <div class="tile"><div class="cal">${cal}</div>
@@ -1276,7 +1302,12 @@ function listEditor(h, k){
       ${rows.length > 1 ? `<button class="lx" data-x="${i}" aria-label="Remove">✕</button>` : ''}</div>`).join('');
     box.querySelectorAll('input').forEach(inp => inp.oninput = e => rows[+e.target.dataset.i] = e.target.value);
     box.querySelectorAll('input').forEach(inp => inp.onkeydown = e => {
-      if (e.key === 'Enter'){ e.preventDefault(); rows.push(''); draw(true); } });
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const i = +e.target.dataset.i, all = box.querySelectorAll('input');
+      if (i < all.length - 1) all[i + 1].focus();      // straight down to the next line
+      else { rows.push(''); draw(true); }              // only make a new one at the bottom
+    });
     box.querySelectorAll('.lx').forEach(b => b.onclick = () => { rows.splice(+b.dataset.x,1); draw(); });
     if (focusLast){ const all = box.querySelectorAll('input'); all[all.length-1].focus(); }
   };
@@ -1288,6 +1319,43 @@ function listEditor(h, k){
     const clean = rows.map(s => s.trim()).filter(Boolean);
     const was = done(h,k);
     setVal(h, k, clean.length ? clean : 0);
+    shut();
+    if (!was && done(h,k)) celebrate(h);
+    render();
+  };
+}
+
+function checkEditor(h, k){
+  const parts = (h.parts || []).filter(Boolean);
+  if (!parts.length) return form(h);                 // nothing to tick yet: go set it up
+  let on = items(h,k).filter(x => parts.includes(x));
+  const el = sheet(`<h2>${esc(h.name)}</h2>
+    <p class="note">${pd(k).toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}${
+      h.question ? ' · ' + esc(h.question) : ''}</p>
+    <div id="ps"></div>
+    <p class="note" id="cnt" style="margin:12px 0 0"></p>
+    <div style="height:10px"></div>
+    <button class="big" id="ok">Save</button>
+    <button class="ghost" id="rm">Clear this day</button>`);
+  el.style.setProperty('--ac', h.color);
+  const box = el.querySelector('#ps'), cnt = el.querySelector('#cnt');
+  const draw = () => {
+    box.innerHTML = parts.map(p => `<button class="prow ${on.includes(p) ? 'on' : ''}" type="button" data-p="${esc(p)}">
+      <span class="pbox"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></span>
+      <span class="pname">${esc(p)}</span></button>`).join('');
+    cnt.textContent = on.length + ' of ' + parts.length + ' ticked'
+      + (on.length >= h.target ? ' · that counts as done'
+         : ' · ' + (h.target - on.length) + ' more for a done day');
+  };
+  draw();
+  box.onclick = e => { const b = e.target.closest('[data-p]'); if (!b) return;
+    const p = b.dataset.p;
+    on = on.includes(p) ? on.filter(x => x !== p) : on.concat(p);
+    draw(); if (navigator.vibrate) navigator.vibrate(6); };
+  el.querySelector('#rm').onclick = () => { setVal(h,k,0); shut(); render(); };
+  el.querySelector('#ok').onclick = () => {
+    const was = done(h,k);
+    setVal(h, k, on.length ? parts.filter(p => on.includes(p)) : 0);   // keep the listed order
     shut();
     if (!was && done(h,k)) celebrate(h);
     render();
@@ -1463,9 +1531,10 @@ function form(existing){
   const el = sheet(`<h2>${existing ? 'Edit habit' : 'New habit'}</h2>
     <p class="note">Small and specific beats ambitious. You can always raise the bar later.</p>
     <div class="seg" id="ty">
-      <button data-t="yes" class="${type==='yes'?'on':''}">Done or not</button>
-      <button data-t="num" class="${type==='num'?'on':''}">A number</button>
-      <button data-t="list" class="${type==='list'?'on':''}">A list</button></div>
+      <button data-t="yes" class="${type==='yes'?'on':''}">Yes/no</button>
+      <button data-t="num" class="${type==='num'?'on':''}">Number</button>
+      <button data-t="list" class="${type==='list'?'on':''}">Write</button>
+      <button data-t="set" class="${type==='set'?'on':''}">Checklist</button></div>
     <div class="fld"><em>Name</em><input id="nm" value="${esc(h.name)}" placeholder="Wake up early"></div>
     <div class="fld"><em>Icon</em>
       <div class="icrow">
@@ -1486,6 +1555,12 @@ function form(existing){
     <div id="lf" class="fld" style="display:${type==='list'?'block':'none'}">
       <em>How many things per day</em>
       <input id="lt" type="number" inputmode="numeric" min="1" step="1" value="${h.type==='list'?h.target:3}"></div>
+    <div id="sf" class="fld" style="display:${type==='set'?'block':'none'}">
+      <em>Things to tick off</em>
+      <div id="parts"></div>
+      <button class="ghost" id="pmore" type="button" style="text-align:left;padding-left:2px;margin:0 0 10px">+ Add another</button>
+      <em>How many are needed for a done day</em>
+      <input id="pt" type="number" inputmode="numeric" min="1" step="1" value="${h.type==='set'?h.target:''}" placeholder="all of them"></div>
     <div class="row2">
       <div class="fld"><em>How often</em><select id="fq">${FREQS.map(f =>
         `<option value="${f[0]}/${f[1]}" ${!(h.days&&h.days.length)&&h.fnum===f[0]&&h.fden===f[1]?'selected':''}>${f[2]}</option>`).join('')}
@@ -1508,7 +1583,31 @@ function form(existing){
   el.querySelector('#ty').onclick = e => { const b = e.target.closest('button'); if (!b) return;
     type = b.dataset.t; el.querySelectorAll('#ty button').forEach(x => x.classList.toggle('on', x === b));
     el.querySelector('#nf').style.display = type === 'num' ? 'block' : 'none';
-    el.querySelector('#lf').style.display = type === 'list' ? 'block' : 'none'; };
+    el.querySelector('#lf').style.display = type === 'list' ? 'block' : 'none';
+    el.querySelector('#sf').style.display = type === 'set' ? 'block' : 'none'; };
+  let parts = (h.parts || []).filter(Boolean);
+  if (!parts.length) parts = ['', '', ''];
+  const pbox = el.querySelector('#parts');
+  const drawParts = (focusLast) => {
+    pbox.innerHTML = parts.map((v,i) => `<div class="lrow">
+      <span class="ln" style="background:var(--ac,#7C6BFF)">${i+1}</span>
+      <input data-i="${i}" value="${esc(v)}" placeholder="Creatine">
+      ${parts.length > 1 ? `<button class="lx" type="button" data-x="${i}" aria-label="Remove">✕</button>` : ''}</div>`).join('');
+    pbox.querySelectorAll('input').forEach(inp => {
+      inp.oninput = e => parts[+e.target.dataset.i] = e.target.value;
+      inp.onkeydown = e => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const i = +e.target.dataset.i, all = pbox.querySelectorAll('input');
+        if (i < all.length - 1) all[i + 1].focus();
+        else { parts.push(''); drawParts(true); }
+      };
+    });
+    pbox.querySelectorAll('.lx').forEach(b => b.onclick = () => { parts.splice(+b.dataset.x,1); drawParts(); });
+    if (focusLast){ const all = pbox.querySelectorAll('input'); all[all.length-1].focus(); }
+  };
+  drawParts();
+  el.querySelector('#pmore').onclick = () => { parts.push(''); drawParts(true); };
   let icon = h.icon || '';
   const ic = el.querySelector('#ic'), ip = el.querySelector('#ip');
   const setIcon = v => { icon = Array.from(v.trim()).slice(0,3).join('');
@@ -1564,12 +1663,22 @@ function form(existing){
     if (fv === 'days' && !days.length){ el.querySelector('#dw').scrollIntoView({block:'center'});
       el.querySelector('#dp').animate([{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'none'}],
         {duration:220}); return; }
+    const tick = parts.map(s => s.trim()).filter(Boolean);
+    if (type === 'set' && !tick.length){
+      el.querySelector('#sf').scrollIntoView({block:'center'});
+      el.querySelector('#parts').animate([{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'none'}],
+        {duration:220});
+      return;
+    }
     const [fn,fd] = fv === 'days' ? [days.length,7] : fv.split('/').map(Number);
     const data = { name, question: el.querySelector('#qs').value.trim(), type, color,
       remind: el.querySelector('#rm').value || '', photo, icon,
       unit: type==='num' ? el.querySelector('#un').value.trim() : '',
       target: type==='num' ? (parseFloat(el.querySelector('#tg').value)||1)
-            : type==='list' ? Math.max(1, parseInt(el.querySelector('#lt').value)||3) : 1,
+            : type==='list' ? Math.max(1, parseInt(el.querySelector('#lt').value)||3)
+            : type==='set' ? Math.min(Math.max(1, parseInt(el.querySelector('#pt').value) || tick.length), tick.length)
+            : 1,
+      parts: type==='set' ? tick : [],
       fnum:fn, fden:fd, days };
     if (existing){
       const from = existing.unit, to = data.unit;
@@ -1690,7 +1799,9 @@ function aiMarkdown(){
     if (h.question) out.push('- The question asked each day: "' + h.question + '"');
     out.push('- Type: ' + (h.type === 'yes' ? 'done or not'
       : h.type === 'num' ? 'number, goal ' + h.target + (h.unit ? ' ' + h.unit : '') + ' a day'
+      : h.type === 'set' ? 'checklist of ' + (h.parts || []).length + ', ' + h.target + ' needed for a done day'
       : 'list, ' + h.target + ' things a day'));
+    if (h.type === 'set' && (h.parts || []).length) out.push('- On the checklist: ' + h.parts.join(', '));
     out.push('- Schedule: ' + schedLabel(h));
     out.push('- Logging since: ' + longDate(s.began) + ' (' + (daysBetween(s.began, tk0) + 1) + ' days)');
     out.push('- Score: ' + Math.round(score(h, t) * 100) + '%');

@@ -373,6 +373,43 @@ body.light .nav{box-shadow:0 8px 26px rgba(20,20,40,.14)}
 #warn{display:none;background:#FFC53D;color:#161612;font-size:12.5px;font-weight:700;line-height:1.45;
   padding:calc(9px + env(safe-area-inset-top)) 16px 9px;text-align:center}
 #warn.on{display:block}
+/* ---------- weekly brief ---------- */
+#brief{position:fixed;inset:0;z-index:85;display:none;overflow:hidden;background:#08080c}
+#brief.on{display:block}
+.bcard{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;
+  padding:30px 26px calc(72px + env(safe-area-inset-bottom));color:#fff;overflow:hidden}
+.bcard::after{content:"";position:absolute;width:420px;height:420px;border-radius:50%;
+  background:rgba(255,255,255,.13);filter:blur(60px);right:-140px;top:-160px;pointer-events:none}
+.bsegs{position:absolute;top:calc(12px + env(safe-area-inset-top));left:14px;right:14px;
+  display:flex;gap:4px;z-index:3}
+.bsegs i{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.28)}
+.bsegs i.on{background:#fff}
+.bx{position:absolute;top:calc(26px + env(safe-area-inset-top));right:12px;z-index:4;
+  width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
+  background:rgba(0,0,0,.22);color:#fff;font-size:17px;font-weight:700}
+.bk{font-size:12px;font-weight:800;letter-spacing:.15em;text-transform:uppercase;opacity:.78;
+  position:relative;z-index:2}
+.bbig{font-size:66px;font-weight:800;letter-spacing:-.05em;line-height:1;margin-top:14px;
+  position:relative;z-index:2}
+.bbig.sm{font-size:38px;letter-spacing:-.03em;line-height:1.12}
+.bbig.md{font-size:50px}
+.bsub{font-size:19.5px;font-weight:700;margin-top:14px;line-height:1.32;position:relative;z-index:2}
+.bnote{font-size:14.5px;font-weight:600;opacity:.82;margin-top:16px;line-height:1.55;
+  position:relative;z-index:2}
+.bdots{display:flex;gap:6px;margin-top:22px;position:relative;z-index:2}
+.bdots i{flex:1;height:36px;border-radius:8px;background:rgba(255,255,255,.22);
+  display:grid;place-items:end center;font-size:9.5px;font-weight:800;padding-bottom:4px;
+  color:rgba(255,255,255,.8);font-style:normal}
+.bhint{position:absolute;left:0;right:0;bottom:calc(22px + env(safe-area-inset-bottom));
+  text-align:center;font-size:12px;font-weight:600;color:rgba(255,255,255,.5);z-index:2}
+.bready{width:100%;display:flex;align-items:center;gap:10px;padding:14px 16px;margin:0 0 12px;
+  border-radius:18px;color:#fff;font-size:14.5px;font-weight:700;text-align:left;
+  background:linear-gradient(120deg,#7C6BFF,#5B8DEF);box-shadow:0 8px 22px rgba(92,109,239,.28)}
+.bready span{margin-left:auto;font-size:12px;font-weight:700;opacity:.85}
+.wkbtn{width:100%;display:flex;align-items:center;gap:12px;padding:16px;border-radius:20px;
+  color:#fff;text-align:left;background:linear-gradient(120deg,#7C6BFF,#5B8DEF)}
+.wkbtn b{display:block;font-size:16px;font-weight:800}
+.wkbtn em{font-style:normal;font-size:12.5px;font-weight:600;opacity:.85}
 #confetti{position:fixed;inset:0;pointer-events:none;z-index:80}
 #toast{position:fixed;left:50%;transform:translate(-50%,-140%);top:calc(16px + env(safe-area-inset-top));
   background:var(--ink);color:var(--bg);padding:13px 20px;border-radius:999px;font-size:14.5px;font-weight:800;
@@ -403,6 +440,7 @@ body.light .nav{box-shadow:0 8px 26px rgba(20,20,40,.14)}
 
 <input type="file" id="pf" accept="image/*" hidden>
 <div id="viewer"></div>
+<div id="brief"></div>
 <canvas id="confetti"></canvas>
 <div id="toast"></div>
 <div class="scrim" id="scrim"></div>
@@ -471,7 +509,7 @@ if (navigator.storage && navigator.storage.persist) navigator.storage.persist().
 const VERSION = '1.0.0';
 const KEY = 'loop-habits-v1';
 let S = { habits: [], log: {}, tasks: [], photos: {}, free: [], seen: null,
-          theme: 'dark', greet: true, name: '' };
+          theme: 'dark', greet: true, name: '', brief: '' };
 let timer = null, dirty = false, storageOK = null;
 async function load(){ try{ const r = await window.storage.get(KEY);
   if (r && r.value){ S = Object.assign(S, JSON.parse(r.value)); storageOK = true; return true; } }catch(e){}
@@ -854,6 +892,9 @@ function renderToday(){
   }).join('');
 
   screen.innerHTML = anyHabits ? `
+    ${isToday && briefReady() ? `<button class="bready" id="bopen">📊 Your week is ready
+      <span>${pd(key(lastWeek())).toLocaleDateString(undefined,{day:'numeric',month:'short'})} – ${
+        pd(key(shift(lastWeek(),6))).toLocaleDateString(undefined,{day:'numeric',month:'short'})}</span></button>` : ''}
     <div class="hero"><div class="glow" style="background:${lead ? lead.color : '#7C6BFF'}"></div>
       ${dial(sel)}
       <div style="flex:1;min-width:0">
@@ -877,6 +918,8 @@ function renderToday(){
     <div style="height:8px"></div>`
   : `<div class="blank">No habits yet.<br>Tap + to start with one you can do today.</div>
      ${taskSection()}${freeSection()}`;
+  const bo = screen.querySelector('#bopen');
+  if (bo) bo.onclick = openBrief;
   if (l.some(h => h.photo)) paintThumbs();
 }
 
@@ -1180,6 +1223,11 @@ function renderStats(){
   let ticks = 0; for (const h of S.habits) for (const k in (S.log[h.id]||{})) if (done(h,k)) ticks++;
 
   screen.innerHTML = `
+    ${briefData() ? `<button class="wkbtn" id="wk"><span style="font-size:24px">📊</span>
+      <span style="flex:1"><b>Your week</b><em>${
+        pd(key(lastWeek())).toLocaleDateString(undefined,{day:'numeric',month:'short'})} – ${
+        pd(key(shift(lastWeek(),6))).toLocaleDateString(undefined,{day:'numeric',month:'short'})}</em></span>
+      <span style="font-size:19px;opacity:.7">›</span></button><div style="height:14px"></div>` : ''}
     <div class="tiles">
       <div class="tile"><b>${Math.round(avg*100)}%</b><span>Average score</span></div>
       <div class="tile"><b>🔥 ${fireStreak()}</b><span>Perfect day streak</span></div>
@@ -1225,10 +1273,13 @@ function renderStats(){
     <p class="credits">You have earned <b>${credits()}</b> consistency credit${
       credits() === 1 ? '' : 's'} — one for every day you turned up.</p>
     <div style="height:20px"></div>`;
+  wireStats();
 }
 
 /* ================= detail ================= */
 function openDetail(id){ open = id; $('#nav').classList.add('hide'); go(1, renderDetail); }
+function wireStats(){ const b = screen.querySelector('#wk'); if (b) b.onclick = openBrief; }
+
 function renderDetail(){
   const h = S.habits.find(x => x.id === open); if (!h) return nav(tab);
   const t = today(), sc = score(h,t), st = streaks(h);
@@ -2310,7 +2361,7 @@ const writeKey = async (k, v) => { try{ await window.storage.set(k, JSON.stringi
 
 /* what actually travels */
 const travels = s => ({ habits: s.habits, log: s.log, tasks: s.tasks, free: s.free, seen: s.seen,
-                        theme: s.theme, greet: s.greet, name: s.name });
+                        theme: s.theme, greet: s.greet, name: s.name, brief: s.brief });
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const byId = a => Object.fromEntries((a || []).map(x => [x.id, x]));
 
@@ -2360,7 +2411,7 @@ function mergeLog(base, local, remote){
 const pick = (b, l, r) => same(b, l) ? (r === undefined ? l : r) : l;
 function merge3(base, local, remote){
   const b = base || { habits: [], log: {}, tasks: [], free: [], seen: {},
-                      theme: local.theme, greet: local.greet, name: local.name };
+                      theme: local.theme, greet: local.greet, name: local.name, brief: local.brief };
   const h = mergeList(b.habits, local.habits, remote.habits);
   const t = mergeList(b.tasks, local.tasks, remote.tasks);
   const fr = mergeList(b.free, local.free, remote.free);
@@ -2370,7 +2421,8 @@ function merge3(base, local, remote){
   return { state: { habits: h.list, log: g.log, tasks: t.list, free: fr.list, seen: sn.days,
                     theme: pick(b.theme, local.theme, remote.theme),
                     greet: pick(b.greet, local.greet, remote.greet),
-                    name:  pick(b.name,  local.name,  remote.name) },
+                    name:  pick(b.name,  local.name,  remote.name),
+                    brief: pick(b.brief, local.brief, remote.brief) },
            conflicts: h.conflicts + t.conflicts + g.conflicts + fr.conflicts };
 }
 
@@ -2394,6 +2446,7 @@ async function adopt(state){
   S.habits = state.habits; S.log = state.log; S.tasks = state.tasks; S.theme = state.theme;
   if (state.free !== undefined) S.free = state.free;
   if (state.seen !== undefined) S.seen = state.seen;
+  if (state.brief !== undefined) S.brief = state.brief;
   if (state.greet !== undefined) S.greet = state.greet;
   if (state.name !== undefined) S.name = state.name;
   save(); theme();
@@ -2484,6 +2537,184 @@ function syncSheet(){
     shut(); await syncNow(false);
   };
 }
+
+/* ================= weekly brief =================
+   The week just gone, one card at a time. Every card has to earn its place:
+   with no streak, or no money saved, that card simply is not built. */
+const BRIEFBG = [['#7C6BFF','#5B8DEF'], ['#FF6B57','#FF8A3D'], ['#3DD68C','#2DD4BF'],
+                 ['#E879F9','#FF5CA8'], ['#38BDF8','#7C6BFF'], ['#FFC53D','#FF8A3D']];
+const lastWeek = () => shift(weekStart(today()), -7);      // Monday of the week just gone
+
+function briefData(){
+  const start = lastWeek();
+  const days = [], before = [];
+  for (let i = 0; i < 7; i++){ days.push(key(shift(start, i))); before.push(key(shift(start, i - 7))); }
+  const L = live();
+  const per = L.map(h => {
+    let sched = 0, hit = 0;
+    for (const k of days){
+      if (k < firstDay(h) || !dueOn(h, k) || skipped(h, k)) continue;
+      sched++; if (done(h, k)) hit++;
+    }
+    return { h, sched, hit, pct: sched ? hit / sched : 0 };
+  }).filter(x => x.sched > 0);
+  if (!per.length) return null;
+  const countTicks = ks => ks.reduce((a, k) => a + L.reduce((b, h) => b + (ticked(h, k) ? 1 : 0), 0), 0);
+  const totalSched = per.reduce((a, x) => a + x.sched, 0);
+  const totalHit = per.reduce((a, x) => a + x.hit, 0);
+  const byDay = days.map(k => ({ k, p: dayPct(k) }));
+  const ranked = per.slice().sort((a, b) => b.pct - a.pct || b.sched - a.sched);
+  const alive = L.map(h => ({ h, n: streaks(h).current })).sort((a, b) => b.n - a.n)[0];
+  const freed = (S.free || []).map(f => ({ f, d: freeDays(f) })).sort((a, b) => b.d - a.d)[0];
+  return {
+    start, days, per, totalSched, totalHit,
+    pct: totalSched ? totalHit / totalSched : 0,
+    ticks: countTicks(days), was: countTicks(before),
+    byDay, best: byDay.slice().sort((a, b) => b.p - a.p)[0],
+    perfect: days.filter(k => perfect(k)).length,
+    top: ranked[0], low: ranked[ranked.length - 1],
+    alive, freed
+  };
+}
+
+function briefCards(){
+  const d = briefData();
+  if (!d) return [];
+  const who = (S.name || '').trim();
+  const day = k => pd(k).toLocaleDateString(undefined, { weekday: 'long' });
+  const short = k => pd(k).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  const c = [];
+
+  c.push({ kicker: 'The week just gone', big: short(d.days[0]) + ' – ' + short(d.days[6]), size: 'sm',
+    sub: who ? 'Here is how it went, ' + esc(who) + '.' : 'Here is how it went.',
+    note: 'Seven days, counted honestly.' });
+
+  const pc = Math.round(d.pct * 100);
+  c.push({ kicker: 'You showed up', num: pc, suffix: '%',
+    sub: d.totalHit + ' of ' + d.totalSched + ' scheduled days',
+    note: pc >= 90 ? 'Very nearly untouchable.' : pc >= 70 ? 'A strong week by any measure.'
+      : pc >= 50 ? 'More on than off. That is how it builds.'
+      : pc >= 25 ? 'A quiet week. They happen to everyone.'
+      : 'Not your week. The next one starts anyway.' });
+
+  if (d.was > 0 && d.ticks !== d.was){
+    const up = d.ticks > d.was, diff = Math.abs(d.ticks - d.was);
+    c.push({ kicker: 'Against last week', num: d.ticks, suffix: '',
+      sub: 'things logged',
+      note: up ? diff + ' more than the week before. It is going the right way.'
+               : diff + ' fewer than the week before. Worth a look, not a worry.' });
+  } else if (d.ticks > 0){
+    c.push({ kicker: 'All told', num: d.ticks, suffix: '', sub: 'things logged',
+      note: 'Every one of them was a decision you made.' });
+  }
+
+  if (d.best && d.best.p > 0)
+    c.push({ kicker: 'Your best day', big: day(d.best.k), size: 'md',
+      sub: Math.round(d.best.p * 100) + '% of everything due',
+      note: 'Whatever you did differently on ' + day(d.best.k) + ', do it again.' });
+
+  if (d.perfect > 0)
+    c.push({ kicker: 'Perfect days', num: d.perfect, suffix: '',
+      sub: d.perfect === 1 ? 'day with nothing left undone' : 'days with nothing left undone',
+      note: d.perfect >= 5 ? 'That is very nearly the whole week.' : 'Rare, and worth noticing.' });
+
+  if (d.top && d.top.pct >= 0.5)
+    c.push({ kicker: 'Your strongest habit',
+      big: (d.top.h.icon ? d.top.h.icon + ' ' : '') + esc(d.top.h.name), size: 'sm',
+      sub: d.top.hit + ' of ' + d.top.sched + ' days',
+      note: d.top.pct === 1 ? 'Perfect. Not one missed.' : 'The one you can clearly rely on.' });
+
+  if (d.low && d.low !== d.top && d.low.pct < 0.5)
+    c.push({ kicker: 'The one that slipped',
+      big: (d.low.h.icon ? d.low.h.icon + ' ' : '') + esc(d.low.h.name), size: 'sm',
+      sub: d.low.hit + ' of ' + d.low.sched + ' days',
+      note: 'No lecture. One tick this week and it is alive again.' });
+
+  if (d.alive && d.alive.n >= 3)
+    c.push({ kicker: 'Still running', num: d.alive.n, suffix: '',
+      sub: 'day streak on ' + esc(d.alive.h.name),
+      note: 'Carried into this week unbroken.' });
+
+  if (d.freed && d.freed.d > 0){
+    const f = d.freed.f;
+    c.push({ kicker: 'Free from ' + esc(f.name), num: d.freed.d, suffix: '',
+      sub: d.freed.d === 1 ? 'day' : 'days',
+      note: hasMoney(f) ? 'And about ' + cash(f) + Math.round(pot(f)).toLocaleString() + ' not spent on it.'
+                        : 'Counted one day at a time.' });
+  }
+
+  const cr = credits();
+  if (cr > 0)
+    c.push({ kicker: 'Consistency credits', num: cr, suffix: '',
+      sub: 'earned all time', note: 'One for every day you opened this and faced it.' });
+
+  c.push({ kicker: 'That was your week', big: 'See you next Monday', size: 'sm',
+    sub: '', dots: d.byDay,
+    note: 'Nothing here resets. It only adds up.' });
+  return c;
+}
+
+let bAt = 0, bCards = [];
+function openBrief(){
+  bCards = briefCards();
+  if (!bCards.length){ toast('Not enough logged last week yet'); return; }
+  bAt = 0;
+  S.brief = key(lastWeek()); save();
+  $('#brief').classList.add('on');
+  paintBrief();
+}
+function shutBrief(){ $('#brief').classList.remove('on'); $('#brief').innerHTML = ''; render(); }
+
+function paintBrief(){
+  const c = bCards[bAt], v = $('#brief');
+  const [c1, c2] = BRIEFBG[bAt % BRIEFBG.length];
+  const dots = c.dots ? '<div class="bdots">' + c.dots.map(x =>
+      '<i style="background:rgba(255,255,255,' + (0.16 + x.p * 0.72).toFixed(2) + ')">'
+      + pd(x.k).toLocaleDateString(undefined, { weekday: 'short' })[0] + '</i>').join('') + '</div>' : '';
+  v.innerHTML =
+    '<div class="bcard" style="background:linear-gradient(155deg,' + c1 + ',' + c2 + ')">'
+    + '<div class="bk">' + c.kicker + '</div>'
+    + '<div class="bbig ' + (c.size || '') + '" id="bnum">'
+    + (c.num !== undefined ? c.num + (c.suffix || '') : c.big) + '</div>'
+    + (c.sub ? '<div class="bsub">' + c.sub + '</div>' : '')
+    + dots
+    + (c.note ? '<div class="bnote">' + c.note + '</div>' : '')
+    + '</div>'
+    + '<div class="bsegs">' + bCards.map((_, i) => '<i class="' + (i <= bAt ? 'on' : '') + '"></i>').join('') + '</div>'
+    + '<button class="bx" id="bx" aria-label="Close">✕</button>'
+    + '<div class="bhint">' + (bAt === bCards.length - 1 ? 'Tap to finish' : 'Tap to continue') + '</div>';
+  v.querySelector('#bx').onclick = e => { e.stopPropagation(); shutBrief(); };
+  if (!slow()){
+    v.querySelector('.bcard').animate(
+      [{ opacity: 0, transform: 'scale(.985)' }, { opacity: 1, transform: 'none' }],
+      { duration: 280, easing: 'cubic-bezier(.16,1,.3,1)' });
+    v.querySelectorAll('.bk,.bbig,.bsub,.bdots,.bnote').forEach((el, i) => el.animate(
+      [{ opacity: 0, transform: 'translateY(12px)' }, { opacity: 1, transform: 'none' }],
+      { duration: 400, delay: 70 + i * 70, easing: 'cubic-bezier(.16,1,.3,1)', fill: 'backwards' }));
+  }
+  if (c.num !== undefined) countTo(v.querySelector('#bnum'), c.num, c.suffix || '');
+}
+/* The real number is already on screen. This only animates up to it, and only
+   when frames are actually running: a backgrounded tab pauses rAF, and a count
+   that never finishes must not leave a 0 sitting there. */
+function countTo(el, to, suffix){
+  if (slow() || to === 0 || document.hidden) return;
+  const t0 = performance.now(), dur = 750;
+  el.textContent = '0' + suffix;
+  const land = setTimeout(() => { el.textContent = to + suffix; }, dur + 150);
+  const step = now => { const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    el.textContent = Math.round(to * e) + suffix;
+    if (p < 1) requestAnimationFrame(step); else clearTimeout(land);
+  };
+  requestAnimationFrame(step);
+}
+$('#brief').addEventListener('click', e => {
+  if (e.target.closest('#bx')) return;
+  if (e.clientX < innerWidth * 0.3){ if (bAt > 0){ bAt--; paintBrief(); } return; }
+  if (bAt < bCards.length - 1){ bAt++; paintBrief(); } else shutBrief();
+});
+// offered once, for the week just gone, and only when there is something in it
+const briefReady = () => S.brief !== key(lastWeek()) && !!briefData();
 
 /* ================= confetti ================= */
 const cv = $('#confetti'), cx = cv.getContext('2d');

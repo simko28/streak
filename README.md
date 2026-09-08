@@ -109,6 +109,21 @@ that verifies a Google ID token and hands back the sync code already stored for
 that account, creating one on first sign-in. Signing in then just means "fetch
 my code", and anonymous codes keep working exactly as they do now.
 
+## The weekly brief
+
+On Monday a banner appears on Today: the week just gone, told one card at a
+time. Completion, the change against the week before, your best day, the habit
+that carried you, the one that slipped, streaks, days free, credits. Tap the
+right of the screen to go on, the left to go back.
+
+Every card has to earn its place. No streak, no streak card. No money set
+against a Free from counter, no money card. A week with nothing logged produces
+no brief at all rather than a page of zeroes.
+
+It is offered once per week and remembered in `brief`, which syncs, so seeing it
+on the phone does not leave it waiting on the computer. It is always available
+from the top of Stats.
+
 ## Updating it after it is live
 
 Upload the changed file, wait a minute, reopen the app. The service worker
@@ -187,8 +202,9 @@ is not scheduled for are skipped entirely rather than counted as misses.
    similar, keyed the same way, uploaded once and never rewritten.
 3. **Streak insurance.** Two automatic passes a month so one miss does not zero
    the counter and end the run.
-4. **Weekly review.** Surface habits under 50 percent and offer to lower the
-   target.
+4. **Act on the weekly brief.** The brief already names the habit that
+   slipped. The step after that is offering to lower its target there and then,
+   rather than leaving you to go and do it.
 
 ## Starter prompt for Claude Code
 

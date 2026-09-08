@@ -250,7 +250,9 @@ body.light .nav{box-shadow:0 8px 26px rgba(20,20,40,.14)}
 .gname{flex:1;min-width:0;padding-left:14px;display:flex;align-items:center;gap:9px}
 .gname span{font-size:14.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gdot{width:8px;height:8px;border-radius:50%;flex:none}
-.gcell{width:var(--cw);height:100%;display:grid;place-items:center;font-size:12px;font-weight:700;flex:none}
+.gcell{width:var(--cw);height:100%;display:grid;place-items:center;font-size:12px;font-weight:700;flex:none;
+  transition:transform .12s}
+.gcell.press{transform:scale(.84)}
 .gcell .box{width:26px;height:26px;border-radius:9px;background:var(--faint);display:grid;place-items:center}
 .gcell .box svg{width:15px;height:15px;fill:none;stroke:#fff;stroke-width:3.6;stroke-linecap:round;stroke-linejoin:round}
 .ghead{display:flex;padding:0 0 10px}
@@ -1034,6 +1036,16 @@ screen.addEventListener('pointerdown', e => {
     hold = setTimeout(() => { held = true; if (navigator.vibrate) navigator.vibrate(18);
       taskForm(S.tasks.find(x => x.id === tsk.dataset.task)); }, 420);
     return; }
+  const gc = e.target.closest('.gcell[data-h]');
+  if (gc){ held = false; pressed = gc; gc.classList.add('press');
+    hold = setTimeout(() => { held = true;
+      if (navigator.vibrate) navigator.vibrate(18);
+      const h = S.habits.find(x => x.id === gc.dataset.h), k = gc.dataset.k;
+      setVal(h, k, skipped(h,k) ? 0 : -1);
+      toast(skipped(h,k) ? 'Skipped — streak safe' : 'Skip removed');
+      render();
+    }, 420);
+    return; }
   const c = e.target.closest('.card'); if (!c) return;
   held = false; pressed = c; c.classList.add('press');
   hold = setTimeout(() => { held = true;
@@ -1096,7 +1108,7 @@ screen.addEventListener('pointerup', e => {
     if (h.type === 'set') checkEditor(h, g.dataset.k);
     else if (h.type === 'list') listEditor(h, g.dataset.k);
     else if (h.type === 'num') keypad(h, g.dataset.k);
-    else { setVal(h, g.dataset.k, done(h,g.dataset.k) ? 0 : 1); render(); } }
+    else { setVal(h, g.dataset.k, ticked(h,g.dataset.k) ? 0 : 1); render(); } }
   const s = e.target.closest('[data-detail]');
   if (s && !held) openDetail(s.dataset.detail);
 });
@@ -1113,7 +1125,7 @@ function celebrate(h){
 
 /* ================= grid ================= */
 function renderGrid(){
-  $('#title').textContent = 'History'; $('#sub').textContent = 'Tap any square to fix a day';
+  $('#title').textContent = 'History'; $('#sub').textContent = 'Tap a square to fix it · hold to skip';
   const t = today(), l = live();
   cols = Math.max(4, Math.min(7, Math.floor((Math.min(window.innerWidth,520) - 130) / 46)));
   document.documentElement.style.setProperty('--cw', Math.floor((Math.min(window.innerWidth,520)-32-118)/cols)+'px');

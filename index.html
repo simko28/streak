@@ -15,11 +15,11 @@
 :root{
   --bg:#0B0B10; --lift:#15151E; --lift2:#1D1D28; --edge:#262634;
   --ink:#F4F4F8; --dim:#8C8CA3; --faint:#3A3A4C;
-  --r:22px; --pad:16px;
+  --r:22px; --pad:16px; --pick:1;
 }
 body.light{
   --bg:#F3F2F7; --lift:#FFFFFF; --lift2:#FFFFFF; --edge:#E5E4EE;
-  --ink:#14141C; --dim:#7B7B90; --faint:#DCDBE6;
+  --ink:#14141C; --dim:#7B7B90; --faint:#DCDBE6; --pick:0;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;background:var(--bg);color:var(--ink);
@@ -310,7 +310,18 @@ body.light .nav{box-shadow:0 8px 26px rgba(20,20,40,.14)}
   border-radius:14px;padding:13px 14px;font-size:16px;font-weight:600;color:var(--ink);outline:none;
   -webkit-user-select:text;user-select:text;-webkit-appearance:none;appearance:none;font-family:inherit}
 .fld input:focus,.fld select:focus{border-color:var(--ac,#7C6BFF)}
-.row2{display:flex;gap:12px}.row2>*{flex:1}
+/* Date and time inputs lay themselves out through their own shadow DOM, and the
+   rule above strips -webkit-appearance from every field. On iOS that leaves the
+   value jammed into the corner of a box that will not take the padding, which is
+   why these read as broken on a phone. Give them back a height and align the
+   value box itself. */
+.fld input[type=time],.fld input[type=date]{min-height:50px;padding-top:12px;padding-bottom:12px}
+.fld input[type=time]::-webkit-date-and-time-value,
+.fld input[type=date]::-webkit-date-and-time-value{text-align:left;margin:0;line-height:22px}
+.fld input[type=time]::-webkit-calendar-picker-indicator,
+.fld input[type=date]::-webkit-calendar-picker-indicator{opacity:.55;filter:invert(var(--pick,1))}
+/* without min-width:0 a time input can refuse to shrink and burst the row */
+.row2{display:flex;gap:12px}.row2>*{flex:1;min-width:0}
 .seg{display:flex;background:var(--lift2);border:1px solid var(--edge);border-radius:14px;padding:4px;margin-bottom:16px}
 .seg button{flex:1;padding:10px 2px;border-radius:11px;font-size:12.5px;font-weight:700;color:var(--dim)}
 .prow{width:100%;display:flex;align-items:center;gap:12px;background:var(--lift2);

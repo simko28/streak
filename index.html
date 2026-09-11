@@ -1023,6 +1023,51 @@ screen.addEventListener('pointerup', e => {
 /* ---------- progress photos ----------
    Full images live under their own key so the main state stays small.
    Thumbnails are batched per habit in one key, so a gallery is a single read. */
+/* ---------- example placeholders ----------
+   Grey text that is the same every single time starts to read as furniture.
+   Name, question, unit and checklist lines are drawn from ONE example each
+   time a form opens, because picking them separately invents habits nobody
+   has: "Drink water" above "How many pages did you read?". */
+const EG = {
+  yes: [
+    { name:'Wake up early',    q:'Did you wake up early?' },
+    { name:'Make the bed',     q:'Is the bed made?' },
+    { name:'Stretch',          q:'Did you stretch today?' },
+    { name:'No phone in bed',  q:'Did the phone stay outside?' },
+    { name:'Take the stairs',  q:'Did you take the stairs?' },
+    { name:'Ring someone',     q:'Did you speak to someone you love?' },
+    { name:'Cold shower',      q:'Did you turn the tap the other way?' }
+  ],
+  num: [
+    { name:'Run',        q:'How far did you run?',           unit:'km' },
+    { name:'Read',       q:'How many pages did you read?',   unit:'pages' },
+    { name:'Water',      q:'How many glasses today?',        unit:'glasses' },
+    { name:'Push-ups',   q:'How many did you manage?',       unit:'reps' },
+    { name:'Walk',       q:'How many steps today?',          unit:'steps' },
+    { name:'Deep work',  q:'How many minutes of real focus?', unit:'min' },
+    { name:'Save',       q:'How much did you put aside?',    unit:'€' }
+  ],
+  list: [
+    { name:'Gratitude', q:'What are you proud of today?',  line:'Something you are proud of' },
+    { name:'Wins',      q:'What went right today?',        line:'Something that went right' },
+    { name:'Notebook',  q:'What is worth remembering?',    line:'Worth remembering' },
+    { name:'Ideas',     q:'What did you think of today?',  line:'A thought from today' }
+  ],
+  set: [
+    { name:'Supplements',      q:'Did you take them all?',        parts:['Creatine','Vitamin D','Magnesium'] },
+    { name:'Leaving the house', q:'Everything with you?',         parts:['Keys','Wallet','Headphones'] },
+    { name:'Morning routine',  q:'How far did you get?',          parts:['Water','Sunlight','Stretch'] },
+    { name:'Wind down',        q:'Did you actually stop?',        parts:['Phone away','Read','Lights out'] },
+    { name:'Kit bag',          q:'Is everything packed?',         parts:['Shoes','Towel','Bottle'] }
+  ]
+};
+const EG_TASK = ['Hand the document to Martin', 'Book the dentist', 'Reply to Anna',
+  'Pay the invoice', 'Renew the parking permit', 'Return the parcel', 'Ring the landlord'];
+const EG_FREE = ['Nicotine', 'Alcohol', 'Energy drinks', 'Doomscrolling', 'Takeaway', 'Late-night snacks'];
+const EG_LINE = ['Something you are proud of', 'Something that went right',
+  'A small win from today', 'Worth remembering', 'One good thing'];
+const oneOf = a => a[Math.floor(Math.random() * a.length)];
+
 const EMOJI = ['💪','🏃','🚲','🏊','🥊','🧗','🧘','😴','💧','🥗','🍳','☕','💊','🦷','🚿','🧹',
   '🗑️','🧺','📚','✍️','🧠','🎸','🎹','🎨','📷','💻','📈','💰','📞','🗣️','🌱','🐕',
   '🌞','🌙','🙏','🎯','⏰','🔥','🚭','🧊'];
@@ -1575,6 +1620,7 @@ function entriesFeed(h){
 
 function listEditor(h, k){
   const cur = items(h,k), rows = cur.length ? cur.slice() : Array(h.target).fill('');
+  const hint = oneOf(EG_LINE);
   const el = sheet(`<h2>${esc(h.name)}</h2>
     <p class="note">${pd(k).toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})} · ${h.question || `write ${h.target} things`}</p>
     <div id="rows"></div>
@@ -1586,7 +1632,7 @@ function listEditor(h, k){
   const draw = (focusLast) => {
     box.innerHTML = rows.map((v,i) => `<div class="lrow">
       <span class="ln" style="background:${h.color}">${i+1}</span>
-      <input data-i="${i}" value="${esc(v)}" placeholder="Something you are proud of">
+      <input data-i="${i}" value="${esc(v)}" placeholder="${esc(hint)}">
       ${rows.length > 1 ? `<button class="lx" data-x="${i}" aria-label="Remove">✕</button>` : ''}</div>`).join('');
     box.querySelectorAll('input').forEach(inp => inp.oninput = e => rows[+e.target.dataset.i] = e.target.value);
     box.querySelectorAll('input').forEach(inp => inp.onkeydown = e => {
@@ -1782,7 +1828,7 @@ function freeForm(f){
         <p class="ol">Since ${pd(cur.since).toLocaleDateString(undefined,{month:'long',day:'numeric',year:'numeric'})}.${
           cur.best ? ' Your longest run so far is <b>' + cur.best + ' days</b>.' : ''}</p>`}</div>`}
     <div class="fld"><em>Free from what</em>
-      <input id="fn" value="${esc(cur.name)}" maxlength="40" placeholder="Nicotine"></div>
+      <input id="fn" value="${esc(cur.name)}" maxlength="40" placeholder="${esc(oneOf(EG_FREE))}"></div>
     <div class="fld"><em>Free since</em><input id="fs" type="date" value="${cur.since}"></div>
     <div class="fld"><em>Colour</em><div class="sw" id="fc">${COLORS.map(c =>
       `<button type="button" data-c="${c}" style="background:${c};color:${c}" class="${c === color ? 'on' : ''}"></button>`).join('')}</div></div>
@@ -1855,7 +1901,7 @@ function taskForm(t){
   const el = sheet(`<h2>${nw ? 'New task' : 'Task'}</h2>
     <p class="note">One-off things. They do not affect your habit scores or streaks.</p>
     <div class="fld"><em>What needs doing</em>
-      <input id="tx" value="${esc(cur.text)}" placeholder="Hand the document to Martin"></div>
+      <input id="tx" value="${esc(cur.text)}" placeholder="${esc(oneOf(EG_TASK))}"></div>
     <div class="fld"><em>When</em><div class="days7" id="wh">
       <button data-w="today">Today</button><button data-w="tom">Tomorrow</button><button data-w="none">No date</button>
     </div></div>
@@ -1906,6 +1952,7 @@ function addChooser(){
 function form(existing){
   const h = existing || { name:'', question:'', type:'yes', unit:'', target:1, color:COLORS[8], fnum:1, fden:1 };
   let type = h.type, color = h.color;
+  let ex = oneOf(EG[type] || EG.yes);            // one example, used across the whole form
   const el = sheet(`<h2>${existing ? 'Edit habit' : 'New habit'}</h2>
     <p class="note">Small and specific beats ambitious. You can always raise the bar later.</p>
     <div class="seg" id="ty">
@@ -1913,7 +1960,7 @@ function form(existing){
       <button data-t="num" class="${type==='num'?'on':''}">Number</button>
       <button data-t="list" class="${type==='list'?'on':''}">Write</button>
       <button data-t="set" class="${type==='set'?'on':''}">Checklist</button></div>
-    <div class="fld"><em>Name</em><input id="nm" value="${esc(h.name)}" placeholder="Wake up early"></div>
+    <div class="fld"><em>Name</em><input id="nm" value="${esc(h.name)}" placeholder="${esc(ex.name)}"></div>
     <div class="fld"><em>Icon</em>
       <div class="icrow">
         <span class="icprev" id="ip" style="background:${color}">${esc(h.icon || (h.name.trim()[0]||'?').toUpperCase())}</span>
@@ -1922,9 +1969,9 @@ function form(existing){
       </div>
       <button class="icpick" id="egb" type="button">😀 Pick an emoji</button>
       <div class="emgrid" id="eg">${EMOJI.map(e => `<button type="button" data-e="${e}">${e}</button>`).join('')}</div></div>
-    <div class="fld"><em>Question to ask yourself</em><input id="qs" value="${esc(h.question||'')}" placeholder="Did you wake up early?"></div>
+    <div class="fld"><em>Question to ask yourself</em><input id="qs" value="${esc(h.question||'')}" placeholder="${esc(ex.q)}"></div>
     <div id="nf" style="display:${type==='num'?'block':'none'}"><div class="row2">
-      <div class="fld"><em>Unit</em><input id="un" value="${esc(h.unit||'')}" placeholder="km"></div>
+      <div class="fld"><em>Unit</em><input id="un" value="${esc(h.unit||'')}" placeholder="${esc(ex.unit || 'km')}"></div>
       <div class="fld"><em>Daily goal</em><input id="tg" type="number" inputmode="decimal" step="any" value="${h.target}"></div>
     </div>
       <div class="units" id="up">${UNITS.map(u =>
@@ -1962,14 +2009,19 @@ function form(existing){
     type = b.dataset.t; el.querySelectorAll('#ty button').forEach(x => x.classList.toggle('on', x === b));
     el.querySelector('#nf').style.display = type === 'num' ? 'block' : 'none';
     el.querySelector('#lf').style.display = type === 'list' ? 'block' : 'none';
-    el.querySelector('#sf').style.display = type === 'set' ? 'block' : 'none'; };
+    el.querySelector('#sf').style.display = type === 'set' ? 'block' : 'none';
+    ex = oneOf(EG[type] || EG.yes);
+    el.querySelector('#nm').placeholder = ex.name;
+    el.querySelector('#qs').placeholder = ex.q;
+    if (ex.unit) el.querySelector('#un').placeholder = ex.unit;
+    if (ex.parts) drawParts(); };
   let parts = (h.parts || []).filter(Boolean);
   if (!parts.length) parts = ['', '', ''];
   const pbox = el.querySelector('#parts');
   const drawParts = (focusLast) => {
     pbox.innerHTML = parts.map((v,i) => `<div class="lrow">
       <span class="ln" style="background:var(--ac,#7C6BFF)">${i+1}</span>
-      <input data-i="${i}" value="${esc(v)}" placeholder="Creatine">
+      <input data-i="${i}" value="${esc(v)}" placeholder="${esc((ex.parts || ['Creatine'])[i % (ex.parts || ['Creatine']).length])}">
       ${parts.length > 1 ? `<button class="lx" type="button" data-x="${i}" aria-label="Remove">✕</button>` : ''}</div>`).join('');
     pbox.querySelectorAll('input').forEach(inp => {
       inp.oninput = e => parts[+e.target.dataset.i] = e.target.value;

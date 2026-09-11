@@ -109,6 +109,19 @@ that verifies a Google ID token and hands back the sync code already stored for
 that account, creating one on first sign-in. Signing in then just means "fetch
 my code", and anonymous codes keep working exactly as they do now.
 
+## Streak freeze
+
+One consistency credit is earned for every day the app is opened. Ten of them
+freeze a missed day: it stops counting against the streak, and the record still
+plainly shows you did not do it. A frozen day holds the chain together without
+being counted as a day you did the thing.
+
+Frozen days live in the log as -2, beside the skip's -1, which means they merge
+across devices like everything else. There is no separate ledger: the balance is
+what you have earned minus what the frozen days cost, so freezing spends and
+thawing refunds with nothing to keep in step. Reach back a fortnight at most,
+from the habit's own page.
+
 ## The weekly brief
 
 On Monday a banner appears on Today: the week just gone, told one card at a
@@ -181,7 +194,8 @@ habit = {
 }
 
 task = { id, text, due, doneAt }         // one-off, excluded from all habit metrics
-log[habitId][date] = 1 | -1 | number | [strings]   // done | skipped | measurement | list
+log[habitId][date] = 1 | -1 | -2 | number | [strings]
+// done | skipped | frozen | measurement | list
 
 settings = { theme, greet, name }        // greet: the clock-based line on Today
 ```

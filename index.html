@@ -157,10 +157,12 @@ button{font:inherit;color:inherit;border:0;background:none;cursor:pointer;font-v
   font-size:13px;font-weight:700;color:var(--dim);flex:none}
 .emgrid{display:none;grid-template-columns:repeat(8,1fr);gap:6px;margin-top:10px}
 .emgrid.open{display:grid}
-.icpick{width:100%;margin-top:8px;padding:11px;border-radius:14px;background:var(--lift2);
+.icpick,.more{width:100%;margin-top:8px;padding:11px;border-radius:14px;background:var(--lift2);
   border:1px solid var(--edge);font-size:13.5px;font-weight:700;color:var(--dim);
   transition:border-color .2s,color .2s}
-.icpick.on{border-color:var(--ac,#7C6BFF);color:var(--ink)}
+.icpick.on,.more.on{border-color:var(--ac,#7C6BFF);color:var(--ink)}
+.extras{display:none}
+.extras.open{display:block}
 .emgrid button{padding:7px 0;border-radius:11px;font-size:20px;line-height:1.25;background:var(--lift2);
   transition:transform .1s,background .15s}
 .emgrid button:active{transform:scale(.88)}
@@ -358,7 +360,8 @@ body.light .nav{box-shadow:0 8px 26px rgba(20,20,40,.14)}
   font-size:14px;font-weight:800;color:var(--dim);transition:transform .1s,background .2s,color .2s}
 .days7 button:active{transform:scale(.92)}
 .days7 button.on{background:var(--ac,#7C6BFF);border-color:var(--ac,#7C6BFF);color:#fff}
-.units{display:flex;flex-wrap:wrap;gap:7px;margin:-4px 0 16px}
+.units{display:none;flex-wrap:wrap;gap:7px;margin:10px 0 16px}
+.units.open{display:flex}
 .units button{padding:7px 13px;border-radius:11px;background:var(--lift2);border:1px solid var(--edge);
   font-size:13.5px;font-weight:700;color:var(--dim);transition:transform .1s}
 .units button:active{transform:scale(.93)}
@@ -1974,6 +1977,7 @@ function form(existing){
       <div class="fld"><em>Unit</em><input id="un" value="${esc(h.unit||'')}" placeholder="${esc(ex.unit || 'km')}"></div>
       <div class="fld"><em>Daily goal</em><input id="tg" type="number" inputmode="decimal" step="any" value="${h.target}"></div>
     </div>
+      <button class="more" id="upb" type="button">Pick from common units</button>
       <div class="units" id="up">${UNITS.map(u =>
         `<button data-u="${u}" class="${h.unit===u?'on':''}">${u}</button>`).join('')}</div>
     </div>
@@ -1992,11 +1996,14 @@ function form(existing){
         <option value="days" ${h.days&&h.days.length?'selected':''}>On set days…</option></select></div>
       <div class="fld"><em>Remind me at</em><input id="rm" type="time" value="${h.remind||''}"></div>
     </div>
-    <div class="fld"><em>Extras</em>
-      <button class="optrow ${h.photo?'on':''}" id="ph" type="button">
-        <span class="obox">${CAM}</span>
-        <span class="otxt"><b>Attach a photo</b><em>Adds a camera to this habit. For progress shots.</em></span>
-        <span class="odot"></span></button></div>
+    <div class="fld">
+      <button class="more" id="exb" type="button" style="margin-top:0">⚙ Extras</button>
+      <div class="extras" id="exw">
+        <button class="optrow ${h.photo?'on':''}" id="ph" type="button" style="margin-top:8px">
+          <span class="obox">${CAM}</span>
+          <span class="otxt"><b>Attach a photo</b><em>Adds a camera to this habit. For progress shots.</em></span>
+          <span class="odot"></span></button>
+      </div></div>
     <div class="fld" id="dw" style="display:${h.days&&h.days.length?'block':'none'}">
       <em>Which days</em><div class="days7" id="dp">${DAYSHORT.map((d,i) =>
         `<button data-d="${i}" class="${h.days&&h.days.includes(i)?'on':''}">${d[0]}</button>`).join('')}</div></div>
@@ -2059,6 +2066,12 @@ function form(existing){
   setIcon(icon);
   let photo = !!h.photo;
   const pb = el.querySelector('#ph');
+  const exb = el.querySelector('#exb'), exw = el.querySelector('#exw');
+  // closed by default, but a habit that already has extras on opens showing them
+  const showEx = on => { exw.classList.toggle('open', on); exb.classList.toggle('on', on);
+    exb.textContent = on ? 'Hide extras' : '⚙ Extras' + (photo ? ' · photo on' : ''); };
+  showEx(photo);
+  exb.onclick = () => showEx(!exw.classList.contains('open'));
   pb.onclick = () => { photo = !photo; pb.classList.toggle('on', photo);
     if (navigator.vibrate) navigator.vibrate(8); };
   let picked = (h.days || []).slice();
@@ -2074,8 +2087,13 @@ function form(existing){
     el.querySelector('#ip').style.background = color; };
   const syncUnits = () => { const u = el.querySelector('#un').value.trim();
     el.querySelectorAll('#up button').forEach(b => b.classList.toggle('on', b.dataset.u === u)); };
-  el.querySelector('#up').onclick = e => { const b = e.target.closest('button'); if (!b) return;
+  const upb = el.querySelector('#upb'), up = el.querySelector('#up');
+  const showUnits = on => { up.classList.toggle('open', on); upb.classList.toggle('on', on);
+    upb.textContent = on ? 'Hide the list' : 'Pick from common units'; };
+  upb.onclick = () => showUnits(!up.classList.contains('open'));
+  up.onclick = e => { const b = e.target.closest('button'); if (!b) return;
     el.querySelector('#un').value = b.dataset.u; syncUnits();
+    showUnits(false);                                // picked one, get out of the way
     if (navigator.vibrate) navigator.vibrate(6); };
   el.querySelector('#un').oninput = syncUnits;
   if (!existing) el.querySelector('#cx').onclick = shut;

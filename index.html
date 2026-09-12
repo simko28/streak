@@ -476,7 +476,7 @@ body.light .nav{box-shadow:0 8px 26px rgba(20,20,40,.14)}
    Nothing below this block knows or cares which one is in use.
 ----------------------------------------------------------------*/
 if (!window.storage){
-  const big = k => k.startsWith('photo:') || k.startsWith('thumbs:');
+  const big = k => k.startsWith('photo:') || k.startsWith('thumbs:') || k.startsWith('push:');
   let dbp = null;
   const db = () => dbp ||= new Promise((res,rej) => {
     const r = indexedDB.open('habits-store', 1);
@@ -538,7 +538,7 @@ async function load(){ try{ const r = await window.storage.get(KEY);
 function save(){ dirty = true; qCache.clear(); clearTimeout(timer); timer = setTimeout(async () => {
   try{ await window.storage.set(KEY, JSON.stringify(S)); storageOK = true; dirty = false; }
   catch(e){ storageOK = false; }
-  banner(); syncSoon(); }, 250); }
+  banner(); syncSoon(); writePlan(); }, 250); }
 function banner(){
   const w = document.getElementById('warn');
   w.classList.toggle('on', storageOK === false);
@@ -1543,8 +1543,20 @@ function icsText(){
 }
 function reminders(){
   const withTime = live().filter(h => h.remind), without = live().filter(h => !h.remind);
+  const can = pushable(), ready = installed();
   const el = sheet(`<h2>Reminders</h2>
-    <p class="note">This app can't send push notifications from inside Claude. What it can do is hand your reminder times to your phone's Calendar, which nags you properly — lock screen, Apple Watch, the lot.</p>
+    <p class="note">A nudge at the times you set. The server is told the times and nothing else — when one arrives, this app works out what to say without asking anyone.</p>
+    ${!sync.url ? '<p class="note" style="color:#FFC53D">Open Sync first and set the server address. Reminders go through the same worker.</p>'
+      : !can ? '<p class="note" style="color:#FFC53D">This browser cannot do push notifications.</p>'
+      : !ready ? '<p class="note" style="color:#FFC53D">On iPhone this only works from the installed app. Share → Add to Home Screen, then open it from the icon.</p>' : ''}
+    <button class="optrow ${push.on ? 'on' : ''}" id="po" type="button">
+      <span class="obox" style="font-size:15px">🔔</span>
+      <span class="otxt"><b>Notify me at my reminder times</b><em id="pst">${
+        push.on ? 'On for this device' : 'Off'}</em></span>
+      <span class="odot"></span></button>
+    ${push.on ? '<button class="ghost" id="pt">Send me one now</button>' : ''}
+    <div style="height:16px"></div>
+    <p class="note" style="margin-bottom:10px">Or hand the times to your calendar instead:</p>
     ${withTime.length ? withTime.map(h => `<div class="mrow"><div class="gdot" style="background:${h.color}"></div>
         <span style="flex:1">${esc(h.name)}</span><b style="font-variant-numeric:tabular-nums">${h.remind}</b></div>`).join('')
       : '<p class="note" style="color:#FFC53D">No reminder times set yet. Open a habit → Edit → "Remind me at".</p>'}
@@ -1553,6 +1565,24 @@ function reminders(){
     <button class="big" id="ics" ${withTime.length?'':'disabled style="opacity:.45"'}>Add ${withTime.length} to Calendar</button>
     <button class="ghost" id="cx">Close</button>`);
   el.querySelector('#cx').onclick = shut;
+  el.querySelector('#po').onclick = async () => {
+    const b = el.querySelector('#po'), st = el.querySelector('#pst');
+    st.textContent = push.on ? 'Turning off…' : 'Asking…';
+    if (push.on){ await pushOff(); toast('Reminders off'); }
+    else if (await pushOn()) toast('Reminders on');
+    b.classList.toggle('on', push.on);
+    shut(); reminders();
+  };
+  const pt = el.querySelector('#pt');
+  if (pt) pt.onclick = async () => {
+    pt.textContent = 'Sending…';
+    try {
+      const r = await pushApi('test', { endpoint: push.endpoint });
+      toast(r.ok ? 'Sent — it should arrive in a moment'
+                 : 'The push service said ' + (r.status || '?'));
+    } catch (e) { toast('Could not reach the server'); }
+    pt.textContent = 'Send me one now';
+  };
   el.querySelector('#ics').onclick = () => {
     if (!withTime.length) return;
     const txt = icsText(), a = document.createElement('a');
@@ -2652,6 +2682,95 @@ async function syncNow(quiet){
   finally{ syncing = false; }
 }
 
+/* ================= reminders that actually arrive =================
+   The server is told two things and no more: an endpoint to ring, and the
+   clock times to ring it at. Habit names, questions and history never leave
+   the device — when the push lands, the service worker reads what to say out
+   of IndexedDB here. That is also why the plan below is written to IDB and
+   not just held in memory: a service worker cannot see localStorage. */
+const VAPID_PUBLIC = 'BKoPiFLHBbBQ70VXBqp6dRQnIqqWKC2gEEOmdEIpAyBoqL5hISPWOSg2X6e4IQAT3VnMxY_vHsPk6fUcnNS-XXU';
+const PUSHCFG = 'push-cfg-v1';
+let push = { on: false, endpoint: '' };
+
+const pushable = () => 'serviceWorker' in navigator && 'PushManager' in window
+  && 'Notification' in window;
+// iOS only allows this from an installed app, and says so plainly if asked early
+const installed = () => matchMedia('(display-mode: standalone)').matches
+  || navigator.standalone === true;
+
+const b64ToBytes = s => {
+  const pad = '='.repeat((4 - s.length % 4) % 4);
+  const raw = atob((s + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+};
+
+/* Every habit with a reminder, flattened to what the worker needs to speak. */
+function pushPlan(){
+  const items = live().filter(h => h.remind).map(h => ({
+    id: h.id, name: h.name, q: h.question || '', at: h.remind, days: h.days || []
+  }));
+  const t = key(today());
+  const done = live().filter(h => ticked(h, t) || covered(h, t) || excused(h, t)).map(h => h.id);
+  return { items, done, doneDate: t };
+}
+const planTimes = p => [...new Set(p.items.map(i => i.at))].sort();
+
+async function writePlan(){
+  try { await window.storage.set('push:plan', JSON.stringify(pushPlan())); } catch (e) {}
+}
+
+async function pushApi(route, body){
+  const r = await fetch(sync.url.replace(/\/+$/, '') + '/push/' + route, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  return { status: r.status, ...(await r.json().catch(() => ({}))) };
+}
+
+/* Tell the server the times again. Cheap, and it keeps the UTC offset honest
+   across daylight saving without anyone having to think about it. */
+async function pushSync(quiet){
+  if (!push.on || !sync.url) return;
+  const reg = await navigator.serviceWorker.getRegistration();
+  const s = reg && await reg.pushManager.getSubscription();
+  if (!s){ push.on = false; await writeKey(PUSHCFG, push); return; }
+  const p = pushPlan();
+  await writePlan();
+  try {
+    await pushApi('subscribe', { endpoint: s.endpoint,
+      offset: -new Date().getTimezoneOffset(), times: planTimes(p) });
+  } catch (e) { if (!quiet) toast('Could not reach the reminder server'); }
+}
+
+async function pushOn(){
+  if (!sync.url) { toast('No server set — open Sync first'); return false; }
+  if (!pushable()) { toast('This browser cannot do reminders'); return false; }
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted'){ toast(perm === 'denied'
+    ? 'Notifications are blocked in your settings' : 'Not allowed yet'); return false; }
+  const reg = await navigator.serviceWorker.ready;
+  let s = await reg.pushManager.getSubscription();
+  if (!s) s = await reg.pushManager.subscribe({
+    userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC) });
+  const p = pushPlan();
+  await writePlan();
+  const res = await pushApi('subscribe', { endpoint: s.endpoint,
+    offset: -new Date().getTimezoneOffset(), times: planTimes(p) });
+  if (res.status !== 200){ toast('The server refused the subscription'); return false; }
+  push = { on: true, endpoint: s.endpoint };
+  await writeKey(PUSHCFG, push);
+  return true;
+}
+
+async function pushOff(){
+  const reg = await navigator.serviceWorker.getRegistration();
+  const s = reg && await reg.pushManager.getSubscription();
+  if (s){ try { await pushApi('unsubscribe', { endpoint: s.endpoint }); } catch (e) {}
+          await s.unsubscribe().catch(() => {}); }
+  push = { on: false, endpoint: '' };
+  await writeKey(PUSHCFG, push);
+}
+
 function syncSheet(){
   const on = syncOn();
   const when = sync.at ? new Date(sync.at).toLocaleString(undefined,
@@ -2918,9 +3037,12 @@ addEventListener('resize', () => { movePill(true); if (tab === 'grid' && !open) 
   save();
   render();
   stagger();
+  push = Object.assign(push, (await readKey(PUSHCFG)) || {});
   sync = Object.assign(sync, (await readKey(SCFG)) || {});
   if (!sync.url) sync.url = SYNC_URL;
   if (syncOn()) syncNow(true);
+  writePlan();
+  if (push.on) pushSync(true);        // re-send times so the UTC offset stays right
   requestAnimationFrame(() => movePill(true));
 })();
 </script>
